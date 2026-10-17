@@ -1,113 +1,24 @@
-# FreqUI
+# 实盘操作台
 
-[![Open in Visual Studio Code](https://img.shields.io/static/v1?logo=visualstudiocode&label=&message=Open%20in%20Visual%20Studio%20Code&labelColor=2c2c32&color=007acc&logoColor=007acc)](https://vscode.dev/github/freqtrade/frequi)
-[![FreqUI CI](https://github.com/freqtrade/frequi/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/freqtrade/frequi/actions/)
+只读的 Freqtrade 实盘面板。账号写在服务器上的配置文件里，浏览器不能下单。
 
-Freqtrade UI build with [Vue.js](https://vuejs.org/) and [primevue](https://primevue.org/).
+## 本地开发
 
-## Run this project
-
-Using FreqUI, does require [freqtrade](https://github.com/freqtrade/freqtrade) to be setup and running.
-In newer versions (2021.2 and newer), freqUI is builtin to freqtrade, so manual setup of freqUI will no longer be necessary unless you want to modify freqUI.
-Instructions for this end-user setup can be found in the [freqtrade API documentation](https://www.freqtrade.io/en/stable/rest-api/).
-
-### Running a standalone version of FreqUI
-
-Using Docker, you can also run a pre-built docker image of FreqUI.
+复制 `terminal/bots.example.json` 为 `terminal/bots.local.json`，填入实盘地址和密码。这个文件不会进入 git。
 
 ```bash
-docker compose up -d
+corepack pnpm install
+corepack pnpm --filter frequi-terminal dev
 ```
 
-This will start a pre-built container with FreqUI running on port 3000 - which defaults to the latest version of freqUI.
-You can use `docker compose pull` to update to the latest version of the UI.
+打开 http://127.0.0.1:3001/ 。
 
-Please note: This is a standalone version of FreqUI, and will still require a correctly configured freqtrade bot.
-You'll need to correctly configure [CORS](https://www.freqtrade.io/en/stable/rest-api/#cors) in freqtrade to allow FreqUI to connect to the API.
+## Docker
 
-## Developer project setup
+镜像提供静态页面，并用同一进程转发只读 API。密码通过挂载的配置进入容器，不会打进镜像。
 
-It will require [freqtrade](https://github.com/freqtrade/freqtrade) to be running on the same host with the API enabled under (`localhost:8080`). You can either use the webpack proxy (port can be changed in `vue.config.js`) - or connect directly to the API (recommended).
-
-You will also have to have CORS for freqtrade configured correctly based on the [freqtrade documentation](https://www.freqtrade.io/en/stable/rest-api/#cors).
-Most likely, the correct entry will be `http://localhost:3000` or `http://127.0.0.1:3000` - but the URL must match the URL you use to access FreqUI.
-Ports can vary, so check the URL you're using.
-
-### Project setup
-
-```
-pnpm install
+```bash
+docker compose up --build
 ```
 
-### Compiles and hot-reloads for development
-
-```
-pnpm run dev
-```
-
-### Compiles and minifies for production
-
-```
-pnpm run build
-```
-
-### Lints and fixes files
-
-```
-pnpm run lint
-```
-
-### Build and run docker version
-
-```
-docker-compose build
-docker-compose up -d
-
-# Access using http://localhost:3000/
-```
-
-
-### Customize configuration
-
-See [Configuration Reference](https://cli.vuejs.org/config/).
-
-## Project setup for docker (developing inside dev container) without vscode
-
-### Built dev docker image and run container(s) detached
-
-```
-cd .devcontainer
-docker-compose up -d
-```
-
-### Go inside web-service container and serve
-
-```
-docker-compose exec web /bin/bash
-```
-
-then
-
-```
-pnpm run dev
-```
-
-## Project setup for vscode and docker (developing inside dev container) on Linux
-
-The goal is to have a complete dev environment very quickly and isolated.
-
-### Install missing tools if needed
-
-Follow [getting started](https://code.visualstudio.com/docs/remote/containers#_getting-started) section.
-
-### Build your dev container
-
-View > Command palette > Enter: Remote-Containers rebuild container
-
-### Serve your local server
-
-```
-pnpm run dev
-```
-
-You now have useful vscode extensions, git support, your command history of the project.
+页面在 http://127.0.0.1:3001/ 。配置文件是 `terminal/bots.local.json`。

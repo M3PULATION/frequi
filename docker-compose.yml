@@ -1,12 +1,10 @@
----
 services:
-  frequi:
-    # Uncomment the following lines to build the image locally
-    # build:
-    #   context: .
-    #   dockerfile: "./Dockerfile"
-    # image: frequi
-    image: freqtradeorg/frequi:latest
+  terminal:
+    build: .
     restart: unless-stopped
     ports:
-      - "3000:80"
+      - "3001:80"
+    environment:
+      BOTS_FILE: /config/bots.local.json
+    volumes:
+      - ./terminal/bots.local.json:/config/bots.local.json:ro

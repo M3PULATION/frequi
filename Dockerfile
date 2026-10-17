@@ -1,22 +1,24 @@
-FROM node:26.10.0-alpine AS ui-builder
-
-RUN mkdir /app \
-    && corepack enable
+FROM node:22-alpine AS build
 
 WORKDIR /app
+RUN corepack enable
 
-COPY package.json pnpm-lock.yaml /app/
+COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY terminal/package.json terminal/package.json
+RUN pnpm install --frozen-lockfile --filter frequi-terminal...
 
-RUN apk add --update --no-cache g++ make git \
-    && pnpm install --frozen-lockfile \
-    && apk del g++ make
+COPY terminal terminal
+RUN pnpm --filter frequi-terminal build
 
-COPY . /app
+FROM node:22-alpine
 
-RUN pnpm run build
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PORT=80
+ENV BOTS_FILE=/config/bots.local.json
 
-FROM nginx:1.31.6-alpine
-COPY  --from=ui-builder /app/dist /etc/nginx/html
-COPY  --from=ui-builder /app/nginx.conf /etc/nginx/nginx.conf
+COPY --from=build /app/terminal/dist ./dist
+COPY --from=build /app/terminal/server ./server
+
 EXPOSE 80
-CMD ["nginx"]
+CMD ["node", "--experimental-strip-types", "server/prod.ts"]
