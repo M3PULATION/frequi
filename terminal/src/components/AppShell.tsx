@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import {
   Bot,
   CandlestickChart,
@@ -11,6 +12,8 @@ import {
 } from 'lucide-react';
 import { NavLink, Outlet, useLocation } from 'react-router';
 
+import { BrandMark } from '@/components/BrandMark';
+import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Separator } from '@/components/ui/separator';
 import {
@@ -31,6 +34,20 @@ import {
 import { useListedBots } from '@/hooks/useListedBots';
 import { useTerminal } from '@/hooks/useTerminal';
 import { useSession } from '@/stores/session';
+
+function DataLag({ updatedAt }: { updatedAt: number | null }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+  const seconds = updatedAt == null ? null : Math.max(0, Math.floor((now - updatedAt) / 1000));
+  return (
+    <Badge variant={seconds != null && seconds > 15 ? 'destructive' : 'outline'} data-testid="bot-state">
+      {seconds == null ? '—' : `${seconds} 秒`}
+    </Badge>
+  );
+}
 
 const navItems = [
   { to: '/bots', label: '实盘', icon: Bot },
@@ -55,9 +72,12 @@ export function AppShell() {
     <SidebarProvider>
       <Sidebar collapsible="icon">
         <SidebarHeader>
-          <div className="px-2 py-1 group-data-[collapsible=icon]:hidden">
-            <p className="text-xs tracking-[0.18em] text-muted-foreground">FREQTRADE</p>
-            <p className="truncate text-sm font-medium">{terminal.bot.name}</p>
+          <div className="flex items-center gap-2.5 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
+            <BrandMark className="size-8 shrink-0" />
+            <div className="min-w-0 group-data-[collapsible=icon]:hidden">
+              <p className="truncate text-[13px] font-medium tracking-[0.16em]">MANIPULATION</p>
+              <p className="truncate text-xs text-muted-foreground">{terminal.bot.name}</p>
+            </div>
           </div>
         </SidebarHeader>
         <SidebarContent>
@@ -86,28 +106,34 @@ export function AppShell() {
         <SidebarRail />
       </Sidebar>
       <SidebarInset className="flex h-svh flex-col overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center gap-3 border-b px-3">
+        <header className="@container/header flex h-12 shrink-0 items-center gap-2 border-b px-3">
           <SidebarTrigger />
           <Separator orientation="vertical" className="h-4" />
-          <div className="min-w-0">
-            <Select value={terminal.bot.id} onValueChange={selectBot}>
-              <SelectTrigger className="h-8 w-44" aria-label="切换实盘" data-testid="bot-name">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(catalog.data ?? [terminal.bot]).map((bot) => (
-                  <SelectItem key={bot.id} value={bot.id} disabled={!bot.online}>
-                    {bot.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="truncate px-1 text-xs text-muted-foreground">
-              {[config?.strategy, config?.exchange, config?.timeframe].filter(Boolean).join(' · ') || '等待配置'}
-            </p>
+          <Select value={terminal.bot.id} onValueChange={selectBot}>
+            <SelectTrigger className="w-48 shrink-0" size="sm" aria-label="切换实盘" data-testid="bot-name">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {(catalog.data ?? [terminal.bot]).map((bot) => (
+                <SelectItem key={bot.id} value={bot.id} disabled={!bot.online}>
+                  {bot.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            {config?.strategy ? (
+              <Badge variant="outline" title={config.strategy} className="hidden min-w-0 shrink @min-[540px]/header:inline-flex">
+                <span className="truncate">{config.strategy}</span>
+              </Badge>
+            ) : (
+              <span className="truncate text-xs text-muted-foreground">等待配置</span>
+            )}
+            {config?.exchange ? <Badge variant="secondary" className="hidden @min-[760px]/header:inline-flex">{config.exchange}</Badge> : null}
+            {config?.timeframe ? <Badge variant="secondary" className="hidden @min-[760px]/header:inline-flex">{config.timeframe}</Badge> : null}
           </div>
-          <div className="ml-auto flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
+            <Badge variant={terminal.online === 'offline' ? 'destructive' : 'secondary'} className="gap-1.5">
               <span
                 className={
                   terminal.online === 'online'
@@ -118,13 +144,11 @@ export function AppShell() {
                 }
               />
               {terminal.online === 'online' ? '在线' : terminal.online === 'checking' ? '连接中' : '离线'}
-            </span>
-            <span aria-hidden="true">·</span>
-            <span data-testid="bot-mode">{config ? (config.dry_run ? '模拟' : '实盘') : '…'}</span>
-            <span aria-hidden="true">·</span>
-            <span data-testid="bot-state">
-              {config?.state === 'running' ? '运行中' : config?.state === 'stopped' ? '已停止' : '未知'}
-            </span>
+            </Badge>
+            <Badge variant="outline" data-testid="bot-mode">
+              {config ? (config.dry_run ? '模拟' : '实盘') : '…'}
+            </Badge>
+            <DataLag updatedAt={terminal.dataUpdatedAt} />
           </div>
         </header>
         {terminal.configError ? (

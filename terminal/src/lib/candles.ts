@@ -43,9 +43,9 @@ export type MarkerOrder = {
   order_timestamp?: number;
 };
 
-const UP = '#3ddc97';
-const DOWN = '#ff5d73';
-const EXIT = '#e8b15a';
+const UP = '#3fd68b';
+const DOWN = '#ff5470';
+const EXIT = '#97fce4';
 
 /** Freqtrade serializes API 2.50 as the JSON number 2.5. Compare floats, never version strings. */
 export function apiAtLeast(apiVersion: number, minVersion: number): boolean {

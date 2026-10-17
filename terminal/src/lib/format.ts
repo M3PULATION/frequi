@@ -55,6 +55,34 @@ export function fractionDigits(precision: number | undefined, fallback = 4): num
   return Math.min(Math.max(digits, 0), 10);
 }
 
+function decimalPlaces(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  const text = Math.abs(value).toFixed(8).replace(/0+$/, '').replace(/\.$/, '');
+  const dot = text.indexOf('.');
+  return dot < 0 ? 0 : text.length - dot - 1;
+}
+
+/** Digits needed to tell these prices apart. Sub-dollar prices keep at least four places. */
+export function pricePrecision(values: number[], minimum?: number): number {
+  let digits = minimum ?? 0;
+  for (const value of values) {
+    if (!Number.isFinite(value) || value === 0) continue;
+    const places = decimalPlaces(value);
+    const floor = Math.abs(value) < 1 ? Math.max(places, 4) : places;
+    digits = Math.max(digits, floor);
+  }
+  if (digits === 0) digits = 2;
+  return Math.min(digits, 8);
+}
+
+export function formatPrice(value: number, precision: number): string {
+  return value.toLocaleString('en-US', {
+    minimumFractionDigits: precision,
+    maximumFractionDigits: precision,
+    useGrouping: Math.abs(value) >= 1000,
+  });
+}
+
 export function formatNumber(value: number | null | undefined, digits = 4): string {
   if (value == null || Number.isNaN(value)) return '—';
   const precision = fractionDigits(digits, 4);

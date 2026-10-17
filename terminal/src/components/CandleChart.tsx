@@ -16,7 +16,7 @@ import {
 import { useEffect, useRef } from 'react';
 
 import type { CandleBar, TradeMarker, VolumeBar } from '@/lib/candles';
-import { formatChinaChartTime } from '@/lib/format';
+import { formatChinaChartTime, pricePrecision } from '@/lib/format';
 
 export type ChartPriceLine = {
   price: number;
@@ -32,6 +32,7 @@ type CandleChartProps = {
   volume: VolumeBar[];
   markers: TradeMarker[];
   priceLines: ChartPriceLine[];
+  precision?: number;
   loading: boolean;
   error: string | null;
 };
@@ -73,7 +74,7 @@ function syncBars<T extends { time: number }>(
   }
 }
 
-export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines, loading, error }: CandleChartProps) {
+export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines, precision, loading, error }: CandleChartProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const handlesRef = useRef<ChartHandles | null>(null);
 
@@ -83,32 +84,32 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
     const chart = createChart(container, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#1a1a1a' },
-        textColor: '#d4d4d4',
+        background: { type: ColorType.Solid, color: 'transparent' },
+        textColor: 'rgba(255,255,255,0.72)',
         fontFamily: "'Inter Variable', 'PingFang SC', 'Noto Sans SC', sans-serif",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: '#2a2a2a' },
-        horzLines: { color: '#2a2a2a' },
+        vertLines: { color: 'rgba(255,255,255,0.06)' },
+        horzLines: { color: 'rgba(255,255,255,0.06)' },
       },
-      rightPriceScale: { borderColor: '#333333' },
+      rightPriceScale: { borderColor: 'transparent' },
       localization: {
         timeFormatter: (time: Time) => (typeof time === 'number' ? formatChinaChartTime(time) : ''),
       },
       timeScale: {
-        borderColor: '#333333',
+        borderColor: 'transparent',
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: Time) => (typeof time === 'number' ? formatChinaChartTime(time) : ''),
       },
     });
     const candles = chart.addSeries(CandlestickSeries, {
-      upColor: '#3ddc97',
-      downColor: '#ff5d73',
+      upColor: '#3fd68b',
+      downColor: '#ff5470',
       borderVisible: false,
-      wickUpColor: '#3ddc97',
-      wickDownColor: '#ff5d73',
+      wickUpColor: '#3fd68b',
+      wickDownColor: '#ff5470',
     });
     const volumeSeries = chart.addSeries(
       HistogramSeries,
@@ -137,8 +138,33 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
     const candleData = bars.map((bar) => ({ ...bar, time: asTime(bar.time) }));
     const volumeData = volume.map((bar) => ({ ...bar, time: asTime(bar.time) }));
     const hadBars = handles.bars.length > 0;
+    const places = pricePrecision(
+      [
+        ...bars.flatMap((bar) => [bar.open, bar.high, bar.low, bar.close]),
+        ...priceLines.map((line) => line.price),
+      ],
+      precision,
+    );
+    handles.candles.applyOptions({
+      priceFormat: { type: 'price', precision: places, minMove: 10 ** -places },
+    });
     syncBars(handles.candles, candleData, handles.bars.map((bar) => ({ ...bar, time: asTime(bar.time) })));
     syncBars(handles.volume, volumeData, handles.volumeBars.map((bar) => ({ ...bar, time: asTime(bar.time) })));
+    const visible = bars.slice(-140);
+    let low = Infinity;
+    let high = -Infinity;
+    for (const bar of visible) {
+      if (bar.low < low) low = bar.low;
+      if (bar.high > high) high = bar.high;
+    }
+    if (Number.isFinite(low) && Number.isFinite(high)) {
+      const pad = Math.max((high - low) * 0.12, high * 0.002);
+      handles.candles.applyOptions({
+        autoscaleInfoProvider: () => ({
+          priceRange: { minValue: low - pad, maxValue: high + pad },
+        }),
+      });
+    }
     if (!hadBars && candleData.length > 0) {
       const last = candleData.length - 1;
       handles.chart.timeScale().setVisibleLogicalRange({
@@ -187,15 +213,15 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
           title: line.title,
         }),
       );
-  }, [bars, markers, priceLines, volume]);
+  }, [bars, markers, precision, priceLines, volume]);
 
   return (
-    <section className="flex h-full min-h-[520px] flex-col bg-card" data-testid="candle-chart">
-      <header className="flex items-baseline justify-between border-b px-3 py-2">
+    <section className="flex h-full min-h-0 flex-col bg-transparent" data-testid="candle-chart">
+      <header className="flex h-8 shrink-0 items-center justify-between px-1">
         <h2 className="font-mono text-sm">
           {pair} <span className="text-muted-foreground">{timeframe}</span>
         </h2>
-        <p className="text-xs text-muted-foreground">{error ?? (loading ? '正在加载 K 线…' : '北京时间 UTC+8')}</p>
+        <p className="text-xs text-muted-foreground">{error ?? (loading ? '正在加载 K 线…' : '')}</p>
       </header>
       <div ref={containerRef} className="min-h-0 flex-1" />
     </section>

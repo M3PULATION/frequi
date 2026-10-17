@@ -6,12 +6,11 @@ import { fetchTradeHistory, fetchWhitelist } from '@/api/insights';
 import { CandleChart, type ChartPriceLine } from '@/components/CandleChart';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
-import { Card } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
 import { barsFromCandles, candleTimeframe, markersForTrades } from '@/lib/candles';
-import { CANDLE_POLL_MS, formatNumber, formatPercentPoints, formatRatio, profitTone, visibleInterval } from '@/lib/format';
+import { CANDLE_POLL_MS, formatNumber, formatPercentPoints, formatRatio, fractionDigits, profitTone, visibleInterval } from '@/lib/format';
 import { candleLimitForTrades, currentRoiRatio, takeProfitPrice } from '@/lib/levels';
 import { useMemo } from 'react';
 
@@ -98,13 +97,13 @@ export function ChartPage() {
         {
           price: trade.open_rate,
           title: '',
-          color: trade.is_short ? '#ff5d73' : '#3ddc97',
+          color: trade.is_short ? '#ff5470' : '#3fd68b',
           style: 'dashed',
         },
-        { price: trade.stop_loss_abs, title: '止损', color: '#e8b15a', style: 'dashed' },
-        ...(takeProfit ? [{ price: takeProfit, title: '止盈', color: '#3ddc97', style: 'dashed' as const }] : []),
+        { price: trade.stop_loss_abs, title: '止损', color: '#ffd25f', style: 'dashed' },
+        ...(takeProfit ? [{ price: takeProfit, title: '止盈', color: '#3fd68b', style: 'dashed' as const }] : []),
         ...(trade.liquidation_price
-          ? [{ price: trade.liquidation_price, title: '清算', color: '#ff5d73', style: 'dotted' as const }]
+          ? [{ price: trade.liquidation_price, title: '清算', color: '#ff5470', style: 'dotted' as const }]
           : []),
       ]
     : [];
@@ -112,8 +111,8 @@ export function ChartPage() {
   const digits = trade?.price_precision ?? 4;
 
   return (
-    <section className="flex min-h-[calc(100svh-3.5rem)] flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="图表" description={pair ? `${pair} · ${timeframe ?? ''}` : terminal.tradesLoading ? '正在读取持仓…' : '选择一笔持仓'}>
+    <section className="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-3">
+      <PageHeader title="图表">
         {terminal.trades.length > 0 ? (
           <Select value={tradeId ?? ''} onValueChange={(value) => navigate(`/chart/${value}`)}>
             <SelectTrigger className="w-64 font-mono" aria-label="选择持仓">
@@ -130,7 +129,7 @@ export function ChartPage() {
         ) : null}
       </PageHeader>
       {!pair ? (
-        <Card className="grid flex-1 place-items-center">
+        <div className="grid flex-1 place-items-center">
           <p className="text-sm text-muted-foreground">
             {terminal.tradesLoading ? '正在读取持仓…' : '这个策略还没有持仓或历史成交。'}
             {!terminal.tradesLoading ? (
@@ -139,7 +138,7 @@ export function ChartPage() {
               </Link>
             ) : null}
           </p>
-        </Card>
+        </div>
       ) : (
         <>
           {trade ? (
@@ -147,14 +146,14 @@ export function ChartPage() {
               <Badge variant={trade.is_short ? 'destructive' : 'secondary'}>{trade.is_short ? '空' : '多'}</Badge>
               <span className="font-mono text-muted-foreground">#{trade.trade_id}</span>
               <span className={`font-mono ${profitTone(trade.profit_ratio ?? trade.profit_pct)}`}>{formatPercentPoints(percent)}</span>
-              <span className="font-mono text-[#e8b15a]">止损 {formatNumber(trade.stop_loss_abs, digits)}</span>
-              <span className="font-mono text-[#3ddc97]">
+              <span className="font-mono text-[#ffd25f]">止损 {formatNumber(trade.stop_loss_abs, digits)}</span>
+              <span className="font-mono text-[#3fd68b]">
                 止盈 {takeProfit != null ? formatNumber(takeProfit, digits) : roiRatio != null ? `${formatRatio(roiRatio)} 无对应价格` : '—'}
               </span>
-              <span className="font-mono text-[#ff5d73]">清算 {formatNumber(trade.liquidation_price, digits)}</span>
+              <span className="font-mono text-[#ff5470]">清算 {formatNumber(trade.liquidation_price, digits)}</span>
             </div>
           ) : null}
-          <Card className="min-h-[520px] flex-1 overflow-hidden py-0">
+          <div className="min-h-0 flex-1 overflow-hidden">
             {timeframe ? (
               <CandleChart
                 key={`${terminal.bot.id}:${pair}:${timeframe}`}
@@ -164,13 +163,14 @@ export function ChartPage() {
                 volume={chart.volume}
                 markers={markers}
                 priceLines={priceLines}
+                precision={trade?.price_precision != null ? fractionDigits(trade.price_precision, 4) : undefined}
                 loading={candleQuery.isLoading}
                 error={errorMessage(candleQuery.error)}
               />
             ) : (
               <p className="p-6 text-sm text-muted-foreground">还没有读到 K 线周期</p>
             )}
-          </Card>
+          </div>
         </>
       )}
     </section>

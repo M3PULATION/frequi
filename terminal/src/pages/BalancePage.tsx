@@ -25,7 +25,7 @@ export function BalancePage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="余额" description="账户与机器人持有的资金，约每 15 秒刷新。" />
+      <PageHeader title="余额" />
       {balanceError ? <p className="text-sm text-destructive">{balanceError}</p> : null}
       {balanceLoading ? <Skeleton className="h-28" /> : null}
       {balance ? (
