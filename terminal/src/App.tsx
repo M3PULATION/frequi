@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
 
 import { AppShell } from '@/components/AppShell';
@@ -19,8 +19,14 @@ import { useSession } from '@/stores/session';
 
 function useSelectedListedBot() {
   const selectedId = useSession((state) => state.selectedId);
+  const selectBot = useSession((state) => state.selectBot);
   const catalog = useListedBots();
   const bot = catalog.data?.find((item) => item.id === selectedId) ?? null;
+  useEffect(() => {
+    if (bot || !catalog.data?.length) return;
+    const next = catalog.data.find((item) => item.online) ?? catalog.data[0];
+    if (next) selectBot(next.id);
+  }, [bot, catalog.data, selectBot]);
   return { catalog, bot };
 }
 

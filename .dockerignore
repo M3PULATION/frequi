@@ -7,3 +7,8 @@ terminal/bots.local.json
 .cursor
 .claude
 .codex
+.deploy
+src
+e2e
+tests
+.github

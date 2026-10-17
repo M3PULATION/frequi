@@ -15,10 +15,10 @@ corepack pnpm --filter frequi-terminal dev
 
 ## Docker
 
-镜像提供静态页面，并用同一进程转发只读 API。密码通过挂载的配置进入容器，不会打进镜像。
+镜像提供静态页面，并用同一进程转发只读 API。密码通过挂载的配置进入容器，不会打进镜像。容器只监听本机 `127.0.0.1:3001`。
 
 ```bash
-docker compose up --build
+docker compose up -d --build
 ```
 
-页面在 http://127.0.0.1:3001/ 。配置文件是 `terminal/bots.local.json`。
+本机页面在 http://127.0.0.1:3001/ 。配置文件是 `terminal/bots.local.json`，修改后需要 `docker compose up -d` 才会重新读取。
