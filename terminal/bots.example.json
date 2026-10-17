@@ -1,0 +1,8 @@
+[
+  {
+    "name": "策略名称",
+    "url": "http://bot-host.example:8080",
+    "username": "freqtrader",
+    "password": "change-me"
+  }
+]
