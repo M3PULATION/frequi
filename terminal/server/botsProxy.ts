@@ -76,7 +76,7 @@ function isReadOnly(method: string, path: string): boolean {
   return false;
 }
 
-export function freqtradeBotsPlugin(configPath: string): Plugin {
+export function createBotProxy(configPath: string) {
   const bots = loadBotConfigs(readFileSync(configPath, 'utf8'));
   const byId = new Map(bots.map((bot) => [bot.id, bot]));
   const sessions = new Map<string, Session>();
@@ -190,43 +190,48 @@ export function freqtradeBotsPlugin(configPath: string): Plugin {
     res.end(payload);
   }
 
+  return function handle(req: IncomingMessage, res: ServerResponse, next: () => void) {
+    const url = req.url || '';
+    if (url.startsWith('/local/bots')) {
+      void listBots()
+        .then((listed) => {
+          res.setHeader('Content-Type', 'application/json');
+          res.end(JSON.stringify(listed));
+        })
+        .catch((error: unknown) => {
+          res.statusCode = 500;
+          res.end(error instanceof Error ? error.message : '无法读取实盘列表');
+        });
+      return;
+    }
+    if (!url.startsWith('/api/')) {
+      next();
+      return;
+    }
+    const header = req.headers['x-ft-bot'];
+    const id = Array.isArray(header) ? header[0] : header;
+    const bot = id ? byId.get(id) : undefined;
+    if (!bot) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ detail: '未知实盘' }));
+      return;
+    }
+    void forward(req, res, bot).catch((error: unknown) => {
+      if (res.headersSent) return;
+      res.statusCode = 502;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({ detail: error instanceof Error ? error.message : '实盘不可达' }));
+    });
+  };
+}
+
+export function freqtradeBotsPlugin(configPath: string): Plugin {
+  const handle = createBotProxy(configPath);
   return {
     name: 'freqtrade-bots',
     configureServer(server) {
-      server.middlewares.use((req, res, next) => {
-        const url = req.url || '';
-        if (url.startsWith('/local/bots')) {
-          void listBots()
-            .then((listed) => {
-              res.setHeader('Content-Type', 'application/json');
-              res.end(JSON.stringify(listed));
-            })
-            .catch((error: unknown) => {
-              res.statusCode = 500;
-              res.end(error instanceof Error ? error.message : '无法读取实盘列表');
-            });
-          return;
-        }
-        if (!url.startsWith('/api/')) {
-          next();
-          return;
-        }
-        const header = req.headers['x-ft-bot'];
-        const id = Array.isArray(header) ? header[0] : header;
-        const bot = id ? byId.get(id) : undefined;
-        if (!bot) {
-          res.statusCode = 400;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ detail: '未知实盘' }));
-          return;
-        }
-        void forward(req, res, bot).catch((error: unknown) => {
-          if (res.headersSent) return;
-          res.statusCode = 502;
-          res.setHeader('Content-Type', 'application/json');
-          res.end(JSON.stringify({ detail: error instanceof Error ? error.message : '实盘不可达' }));
-        });
-      });
+      server.middlewares.use((req, res, next) => handle(req, res, () => next()));
     },
   };
 }

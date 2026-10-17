@@ -1,1 +1,9 @@
-node_modules/*
+node_modules
+**/node_modules
+dist
+terminal/dist
+.git
+terminal/bots.local.json
+.cursor
+.claude
+.codex

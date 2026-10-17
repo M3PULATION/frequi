@@ -8,10 +8,14 @@ import { freqtradeBotsPlugin } from './server/botsProxy';
 
 const botsFile = fileURLToPath(new URL('./bots.local.json', import.meta.url));
 
-export default defineConfig(() => {
-  readFileSync(botsFile, 'utf8');
+export default defineConfig(({ command }) => {
+  const plugins = [react(), tailwindcss()];
+  if (command === 'serve') {
+    readFileSync(botsFile, 'utf8');
+    plugins.push(freqtradeBotsPlugin(botsFile));
+  }
   return {
-    plugins: [react(), tailwindcss(), freqtradeBotsPlugin(botsFile)],
+    plugins,
     resolve: {
       alias: {
         '@': fileURLToPath(new URL('./src', import.meta.url)),
