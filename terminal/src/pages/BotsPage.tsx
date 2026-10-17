@@ -5,13 +5,15 @@ import { createApiClient } from '@/api/client';
 import { fetchHistoricBalance } from '@/api/insights';
 import { CompareLineChart } from '@/components/CompareLineChart';
 import { PageHeader } from '@/components/PageHeader';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useListedBots } from '@/hooks/useListedBots';
 import { formatPercentPoints, profitTone } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { balancePoints, indexedReturn } from '@/lib/wallet';
 
-const COLORS = ['#5b8def', '#3ddc97', '#e8b15a', '#ff5d73', '#c084fc', '#22d3ee'];
+const COLORS = ['#97fce4', '#3fd68b', '#ffd25f', '#ff5470', '#7eb6ff', '#50d2c1'];
 
 export function BotsPage() {
   const catalog = useListedBots();
@@ -46,7 +48,7 @@ export function BotsPage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="实盘" description="各策略自有记录以来的资金变化，起点都记为 0%。切换实盘在顶栏。" />
+      <PageHeader title="实盘" />
       {catalog.isLoading ? <Skeleton className="h-96" /> : null}
       {catalog.error ? <p className="text-sm text-destructive">无法读取实盘列表</p> : null}
       {catalog.data && catalog.data.length === 0 ? (
@@ -55,13 +57,15 @@ export function BotsPage() {
       {bots.length > 0 ? (
         <Card>
           <CardContent className="pt-4">
-            <div className="mb-4 flex flex-wrap gap-2">
+            <div className="mb-3 grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-4">
               {series.map((item) => {
                 const isHidden = hidden.has(item.id);
                 return (
-                  <button
+                  <Button
                     key={item.id}
                     type="button"
+                    variant="ghost"
+                    size="sm"
                     aria-pressed={!isHidden}
                     disabled={!item.online}
                     onClick={() =>
@@ -72,25 +76,21 @@ export function BotsPage() {
                         return next;
                       })
                     }
-                    className={
-                      isHidden
-                        ? 'inline-flex items-center gap-2 rounded-md border border-transparent px-2.5 py-1.5 text-sm text-muted-foreground'
-                        : 'inline-flex items-center gap-2 rounded-md border bg-muted/50 px-2.5 py-1.5 text-sm'
-                    }
+                    className={cn('h-8 w-full justify-start px-2 font-normal', isHidden ? 'opacity-40' : 'bg-muted/40')}
                   >
                     <span
-                      className="size-2.5 rounded-sm"
+                      className="h-0.5 w-3.5 shrink-0 rounded-full"
                       style={
                         isHidden
                           ? { boxShadow: `inset 0 0 0 1.5px ${item.color}` }
                           : { backgroundColor: item.color }
                       }
                     />
-                    <span className={isHidden ? 'line-through' : undefined}>{item.name}</span>
-                    <span className={item.latest == null ? 'text-muted-foreground' : profitTone(item.latest)}>
+                    <span className={cn('min-w-0 flex-1 truncate text-left', isHidden && 'line-through')}>{item.name}</span>
+                    <span className={cn('font-mono text-xs', item.latest == null ? 'text-muted-foreground' : profitTone(item.latest))}>
                       {item.online ? formatPercentPoints(item.latest) : '离线'}
                     </span>
-                  </button>
+                  </Button>
                 );
               })}
             </div>

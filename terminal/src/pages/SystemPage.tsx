@@ -41,7 +41,7 @@ export function SystemPage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="系统" description="机器人配置、资源占用，以及策略画在图上的指标。" />
+      <PageHeader title="系统" />
       <div className="grid gap-3 lg:grid-cols-[1.2fr_0.8fr]">
         <Card>
           <CardHeader>

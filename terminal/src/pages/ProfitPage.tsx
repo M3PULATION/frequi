@@ -125,10 +125,10 @@ export function ProfitPage() {
         { label: '卡玛', value: plain(profit.calmar), tone: profitTone(profit.calmar) },
         { label: '年化', value: formatRatio(profit.cagr), tone: profitTone(profit.cagr) },
         { label: '系统质量数', value: plain(profit.sqn), tone: profitTone(profit.sqn) },
-        { label: '盈利因子', value: plain(profit.profit_factor), hint: '毛利 / 毛亏', tone: profitTone((profit.profit_factor ?? 0) - 1) },
+        { label: '盈利因子', value: plain(profit.profit_factor), tone: profitTone((profit.profit_factor ?? 0) - 1) },
         { label: '期望值', value: money(profit.expectancy, stake), tone: profitTone(profit.expectancy) },
-        { label: '期望比率', value: plain(profit.expectancy_ratio), hint: '平均盈利 / 平均亏损' },
-        { label: '恢复因子', value: plain(recoveryFactor(profit.profit_closed_coin, profit.max_drawdown_abs)), hint: '已平仓盈亏 / 最大回撤金额', tone: profitTone(recoveryFactor(profit.profit_closed_coin, profit.max_drawdown_abs)) },
+        { label: '期望比率', value: plain(profit.expectancy_ratio) },
+        { label: '恢复因子', value: plain(recoveryFactor(profit.profit_closed_coin, profit.max_drawdown_abs)), tone: profitTone(recoveryFactor(profit.profit_closed_coin, profit.max_drawdown_abs)) },
       ]
     : [];
   const drawdownItems: MetricItem[] = profit
@@ -152,7 +152,7 @@ export function ProfitPage() {
         { label: '年化下行偏差', value: formatPlainRatio(derived.daily.annualDownside) },
         { label: '净值最大回撤', value: formatPlainRatio(derived.equity?.maxDrawdown), tone: profitTone(derived.equity?.maxDrawdown == null ? null : -derived.equity.maxDrawdown) },
         { label: '溃疡指数', value: formatPlainRatio(derived.equity?.ulcer) },
-        { label: '净值恢复因子', value: plain(derived.equity?.recovery), hint: '区间收益率 / 净值最大回撤', tone: profitTone(derived.equity?.recovery) },
+        { label: '净值恢复因子', value: plain(derived.equity?.recovery), tone: profitTone(derived.equity?.recovery) },
       ]
     : [];
   const tradeItems: MetricItem[] = derived.trades
@@ -168,11 +168,11 @@ export function ProfitPage() {
         { label: '毛利', value: money(derived.trades.grossProfit, stake), tone: 'text-up' },
         { label: '毛亏', value: money(-derived.trades.grossLoss, stake), tone: 'text-down' },
         { label: '手续费', value: money(-derived.trades.fees, stake) },
-        { label: '资金费', value: money(derived.trades.funding, stake), hint: '正数记为收入', tone: profitTone(derived.trades.funding) },
-        { label: '入场滑点', value: formatRatio(derived.trades.avgEntrySlippage), hint: '正数比委托更差', tone: profitTone(derived.trades.avgEntrySlippage == null ? null : -derived.trades.avgEntrySlippage) },
-        { label: '出场滑点', value: formatRatio(derived.trades.avgExitSlippage), hint: '正数比委托更差', tone: profitTone(derived.trades.avgExitSlippage == null ? null : -derived.trades.avgExitSlippage) },
-        { label: '不利偏移', value: formatPlainRatio(derived.trades.avgAdverse), hint: '持仓中逆向的最大偏离' },
-        { label: '有利偏移', value: formatPlainRatio(derived.trades.avgFavorable), hint: '持仓中顺向的最大偏离' },
+        { label: '资金费', value: money(derived.trades.funding, stake), tone: profitTone(derived.trades.funding) },
+        { label: '入场滑点', value: formatRatio(derived.trades.avgEntrySlippage), tone: profitTone(derived.trades.avgEntrySlippage == null ? null : -derived.trades.avgEntrySlippage) },
+        { label: '出场滑点', value: formatRatio(derived.trades.avgExitSlippage), tone: profitTone(derived.trades.avgExitSlippage == null ? null : -derived.trades.avgExitSlippage) },
+        { label: '不利偏移', value: formatPlainRatio(derived.trades.avgAdverse) },
+        { label: '有利偏移', value: formatPlainRatio(derived.trades.avgFavorable) },
       ]
     : [];
   const sides = [
@@ -183,7 +183,7 @@ export function ProfitPage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="盈亏" description="夏普、索提诺、卡玛等由接口按日收益计算。成交和余额曲线上的指标在本页补算。样本很短时，年化会被放大。" />
+      <PageHeader title="盈亏" />
       {profitError ? <p className="text-sm text-destructive">{profitError}</p> : null}
       {profitLoading ? (
         <div className="grid gap-3 sm:grid-cols-2">
@@ -193,9 +193,9 @@ export function ProfitPage() {
       ) : null}
       {profitItems.length > 0 ? <MetricList title="收益" items={profitItems} /> : null}
       {riskItems.length > 0 ? (
-        <MetricList title="风险" description="无风险利率按 0。夏普和索提诺用日收益，再乘以 √365。" items={riskItems} />
+        <MetricList title="风险" items={riskItems} />
       ) : null}
-      {drawdownItems.length > 0 ? <MetricList title="回撤" description="时间是北京时间。" items={drawdownItems} /> : null}
+      {drawdownItems.length > 0 ? <MetricList title="回撤" items={drawdownItems} /> : null}
       {profitAllQuery.data ? (
         <Card>
           <CardHeader>
@@ -249,10 +249,10 @@ export function ProfitPage() {
         <p className="text-sm text-destructive">{errorMessage(dailyQuery.error ?? historyQuery.error ?? walletQuery.error)}</p>
       ) : null}
       {curveItems.length > 0 ? (
-        <MetricList title="日收益与净值" description="从启动日开始。启动前的空日期不计入。净值用余额曲线。" items={curveItems} />
+        <MetricList title="日收益与净值" items={curveItems} />
       ) : null}
       {tradeItems.length > 0 ? (
-        <MetricList title="已平仓成交" description="滑点为正表示成交比委托价更差。资金费按接口原值，正数记为收入。" items={tradeItems} />
+        <MetricList title="已平仓成交" items={tradeItems} />
       ) : null}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">

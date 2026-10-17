@@ -28,7 +28,7 @@ export function LogsPage() {
 
   return (
     <section className="flex min-h-[calc(100svh-3.5rem)] flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="日志" description="最近 200 条，最新的在最上面。时间是北京时间（UTC+8）。默认隐藏 INFO。">
+      <PageHeader title="日志">
         <div className="flex flex-wrap gap-2">
           {levels.map((level) => {
             const off = hidden.has(level);

@@ -113,7 +113,7 @@ export function HistoryPage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="历史" description={`已平仓记录，共 ${total} 笔，最新的在最上面。点一行看订单。`} />
+      <PageHeader title="历史" />
       {historyQuery.isLoading ? <Skeleton className="h-40" /> : null}
       {historyQuery.error ? <p className="text-sm text-destructive">{errorMessage(historyQuery.error)}</p> : null}
       {historyQuery.data ? (

@@ -18,8 +18,8 @@ describe('candle time', () => {
   it('converts __date_ts milliseconds to chart seconds', () => {
     const { bars, volume } = barsFromCandles(payload);
     expect(bars.map((bar) => bar.time)).toEqual([1_700_000_000, 1_700_000_300]);
-    expect(volume[0]?.color).toBe('#3ddc97');
-    expect(volume[1]?.color).toBe('#ff5d73');
+    expect(volume[0]?.color).toBe('#3fd68b');
+    expect(volume[1]?.color).toBe('#ff5470');
     expect(unixSeconds(1_700_000_000_000)).toBe(1_700_000_000);
   });
 
@@ -52,7 +52,7 @@ describe('markersForOrders', () => {
       ],
     });
     expect(markers).toEqual([
-      { time: 1_700_000_000, position: 'aboveBar', color: '#ff5d73', shape: 'arrowDown', text: '开空' },
+      { time: 1_700_000_000, position: 'aboveBar', color: '#ff5470', shape: 'arrowDown', text: '开空' },
     ]);
   });
 });

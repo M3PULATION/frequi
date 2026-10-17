@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { formatChinaTime, formatNumber, formatRatio, profitTone } from './format';
+import { formatChinaTime, formatNumber, formatPrice, formatRatio, pricePrecision, profitTone } from './format';
 
 describe('format', () => {
   it('colors profit by sign and prints ratios as percents', () => {
@@ -14,6 +14,12 @@ describe('format', () => {
   it('shows UTC timestamps in China time', () => {
     expect(formatChinaTime(Date.UTC(2026, 9, 17, 3, 53, 0))).toContain('11:53');
     expect(formatChinaTime('2026-10-17 03:53:00')).toContain('11:53');
+  });
+
+  it('keeps enough decimals to separate sub-dollar prices', () => {
+    expect(pricePrecision([0.079135, 0.080686])).toBe(6);
+    expect(formatPrice(0.079135, 6)).toBe('0.079135');
+    expect(formatPrice(0.080686, 6)).toBe('0.080686');
   });
 
   it('treats sub-1 precision as a tick size', () => {

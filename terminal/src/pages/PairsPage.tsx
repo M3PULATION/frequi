@@ -52,7 +52,7 @@ export function PairsPage() {
 
   return (
     <section className="flex flex-col gap-4 p-4 md:p-6">
-      <PageHeader title="交易对" description="白名单、黑名单，以及暂时禁止开仓的锁。" />
+      <PageHeader title="交易对" />
       {whitelistQuery.isLoading ? <Skeleton className="h-24" /> : null}
       {whitelistQuery.error ? <p className="text-sm text-destructive">{errorMessage(whitelistQuery.error)}</p> : null}
       {whitelistQuery.data ? (

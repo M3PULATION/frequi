@@ -21,18 +21,18 @@ export function CompareLineChart({ series }: { series: CompareSeries[] }) {
     const chart = createChart(container, {
       autoSize: true,
       layout: {
-        background: { type: ColorType.Solid, color: '#1a1a1a' },
-        textColor: '#d4d4d4',
+        background: { type: ColorType.Solid, color: '#070a12' },
+        textColor: 'rgba(255,255,255,0.72)',
         fontFamily: "'Inter Variable', 'PingFang SC', 'Noto Sans SC', sans-serif",
         fontSize: 11,
       },
       grid: {
-        vertLines: { color: '#2a2a2a' },
-        horzLines: { color: '#2a2a2a' },
+        vertLines: { color: 'rgba(255,255,255,0.06)' },
+        horzLines: { color: 'rgba(255,255,255,0.06)' },
       },
-      rightPriceScale: { borderColor: '#333333' },
+      rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
       timeScale: {
-        borderColor: '#333333',
+        borderColor: 'rgba(255,255,255,0.08)',
         timeVisible: true,
         secondsVisible: false,
         tickMarkFormatter: (time: Time) => (typeof time === 'number' ? formatChinaChartTime(time) : ''),

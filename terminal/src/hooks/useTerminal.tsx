@@ -28,6 +28,7 @@ type TerminalContextValue = {
   logs: LogLine[];
   logsLoading: boolean;
   logsError: string | null;
+  dataUpdatedAt: number | null;
 };
 
 const TerminalContext = createContext<TerminalContextValue | null>(null);
@@ -80,6 +81,11 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
 
   if (!bot) return null;
 
+  const dataUpdatedAt = [tradesQuery, profitQuery, balanceQuery, logsQuery, configQuery, pingQuery].reduce<number | null>(
+    (latest, query) => (query.dataUpdatedAt > 0 && (latest == null || query.dataUpdatedAt > latest) ? query.dataUpdatedAt : latest),
+    null,
+  );
+
   const value: TerminalContextValue = {
     bot,
     client,
@@ -98,6 +104,7 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     logs: logsQuery.data?.logs ?? [],
     logsLoading: logsQuery.isLoading,
     logsError: errorMessage(logsQuery.error),
+    dataUpdatedAt,
   };
 
   return <TerminalContext.Provider value={value}>{children}</TerminalContext.Provider>;
