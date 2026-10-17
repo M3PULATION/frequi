@@ -42,8 +42,26 @@ function serveStatic(req: IncomingMessage, res: ServerResponse) {
   createReadStream(file).pipe(res);
 }
 
-createServer((req, res) => {
+const server = createServer((req, res) => {
+  const path = (req.url || '/').split('?')[0];
+  if (path === '/healthz') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
   proxy(req, res, () => serveStatic(req, res));
-}).listen(port, '0.0.0.0', () => {
+});
+
+server.listen(port, '0.0.0.0', () => {
   console.log(`实盘操作台 http://0.0.0.0:${port}`);
 });
+
+function shutdown(signal: string) {
+  console.log(`收到 ${signal}，正在关闭`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));

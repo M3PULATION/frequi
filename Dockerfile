@@ -1,9 +1,9 @@
 FROM node:22-alpine AS build
 
 WORKDIR /app
-RUN corepack enable
+RUN corepack enable && corepack prepare pnpm@12.10.1 --activate
 
-COPY pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY terminal/package.json terminal/package.json
 RUN pnpm install --frozen-lockfile --filter frequi-terminal...
 
@@ -14,11 +14,16 @@ FROM node:22-alpine
 
 WORKDIR /app
 ENV NODE_ENV=production
-ENV PORT=80
+ENV PORT=8080
 ENV BOTS_FILE=/config/bots.local.json
 
-COPY --from=build /app/terminal/dist ./dist
-COPY --from=build /app/terminal/server ./server
+COPY --from=build --chown=node:node /app/terminal/dist ./dist
+COPY --from=build --chown=node:node /app/terminal/server ./server
 
-EXPOSE 80
+USER node
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8080)+'/healthz').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+
 CMD ["node", "--experimental-strip-types", "server/prod.ts"]
