@@ -10,8 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
 import { barsFromCandles, candleTimeframe, markersForTrades } from '@/lib/candles';
-import { CANDLE_POLL_MS, formatNumber, formatPercentPoints, formatRatio, fractionDigits, profitTone, visibleInterval } from '@/lib/format';
-import { candleLimitForTrades, currentRoiRatio, takeProfitPrice } from '@/lib/levels';
+import { CANDLE_POLL_MS, formatNumber, formatPercentPoints, fractionDigits, profitTone, visibleInterval } from '@/lib/format';
+import { candleLimitForTrades } from '@/lib/levels';
 import { useMemo } from 'react';
 
 export function ChartPage() {
@@ -83,15 +83,6 @@ export function ChartPage() {
     })),
     chart.bars,
   );
-  const roiRatio = trade ? currentRoiRatio(terminal.config?.minimal_roi, trade.open_timestamp) : null;
-  const takeProfit = trade
-    ? takeProfitPrice({
-        openRate: trade.open_rate,
-        isShort: Boolean(trade.is_short),
-        leverage: trade.leverage,
-        roiRatio: roiRatio ?? 0,
-      })
-    : null;
   const priceLines: ChartPriceLine[] = trade
     ? [
         {
@@ -101,7 +92,6 @@ export function ChartPage() {
           style: 'dashed',
         },
         { price: trade.stop_loss_abs, title: '止损', color: '#ffd25f', style: 'dashed' },
-        ...(takeProfit ? [{ price: takeProfit, title: '止盈', color: '#3fd68b', style: 'dashed' as const }] : []),
         ...(trade.liquidation_price
           ? [{ price: trade.liquidation_price, title: '清算', color: '#ff5470', style: 'dotted' as const }]
           : []),
@@ -147,9 +137,6 @@ export function ChartPage() {
               <span className="font-mono text-muted-foreground">#{trade.trade_id}</span>
               <span className={`font-mono ${profitTone(trade.profit_ratio ?? trade.profit_pct)}`}>{formatPercentPoints(percent)}</span>
               <span className="font-mono text-[#ffd25f]">止损 {formatNumber(trade.stop_loss_abs, digits)}</span>
-              <span className="font-mono text-[#3fd68b]">
-                止盈 {takeProfit != null ? formatNumber(takeProfit, digits) : roiRatio != null ? `${formatRatio(roiRatio)} 无对应价格` : '—'}
-              </span>
               <span className="font-mono text-[#ff5470]">清算 {formatNumber(trade.liquidation_price, digits)}</span>
             </div>
           ) : null}

@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/sidebar';
 import { useListedBots } from '@/hooks/useListedBots';
 import { useTerminal } from '@/hooks/useTerminal';
+import { documentTitle } from '@/lib/title';
 import { useSession } from '@/stores/session';
 
 function DataLag({ updatedAt }: { updatedAt: number | null }) {
@@ -67,6 +68,15 @@ export function AppShell() {
   const selectBot = useSession((state) => state.selectBot);
   const location = useLocation();
   const config = terminal.config;
+  const chartTradeId = location.pathname.startsWith('/chart/') ? location.pathname.split('/')[2] : null;
+  const chartTrade = chartTradeId
+    ? terminal.trades.find((trade) => String(trade.trade_id) === chartTradeId)
+    : location.pathname === '/chart'
+      ? terminal.trades[0]
+      : null;
+  useEffect(() => {
+    document.title = documentTitle(location.pathname, chartTrade?.pair);
+  }, [chartTrade?.pair, location.pathname]);
 
   return (
     <SidebarProvider>
@@ -75,7 +85,7 @@ export function AppShell() {
           <div className="flex items-center gap-2.5 px-2 py-1.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0">
             <BrandMark className="size-8 shrink-0" />
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
-              <p className="truncate text-[13px] font-medium tracking-[0.16em]">MANIPULATION</p>
+              <p className="truncate font-brand text-[15px] leading-none font-normal tracking-[-0.04em]">Manipulation</p>
               <p className="truncate text-xs text-muted-foreground">{terminal.bot.name}</p>
             </div>
           </div>

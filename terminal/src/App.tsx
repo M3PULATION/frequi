@@ -15,6 +15,7 @@ import { PositionsPage } from '@/pages/PositionsPage';
 import { ProfitPage } from '@/pages/ProfitPage';
 import { SystemPage } from '@/pages/SystemPage';
 import { useListedBots } from '@/hooks/useListedBots';
+import { documentTitle } from '@/lib/title';
 import { useSession } from '@/stores/session';
 
 function useSelectedListedBot() {
@@ -32,6 +33,9 @@ function useSelectedListedBot() {
 
 function SessionShell() {
   const { catalog, bot } = useSelectedListedBot();
+  useEffect(() => {
+    if (!bot) document.title = documentTitle('/bots');
+  }, [bot]);
   if (catalog.isLoading) return <p className="p-6 text-sm text-muted-foreground">正在读取实盘列表…</p>;
   if (!bot) return <BotsPage />;
   return (

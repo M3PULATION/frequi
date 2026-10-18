@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatNumber, formatPercentPoints, formatPrice, formatSignedNumber, fractionDigits, pricePrecision, profitTone } from '@/lib/format';
+import { formatChinaTime, formatNumber, formatPercentPoints, formatPrice, formatSignedNumber, fractionDigits, pricePrecision, profitTone } from '@/lib/format';
 import type { Trade } from '@/types';
 
 function PositionCard({ trade, stake, moneyDigits, onOpen }: { trade: Trade; stake: string; moneyDigits: number; onOpen: () => void }) {
@@ -16,7 +16,8 @@ function PositionCard({ trade, stake, moneyDigits, onOpen }: { trade: Trade; sta
   const margin = trade.stake_amount;
   const side = trade.is_short ? '空' : '多';
   const leverage = trade.leverage && trade.leverage > 1 ? ` ${formatNumber(trade.leverage, 2)}x` : '';
-  const fields = [
+  const fields: Array<{ label: string; value: string; wide?: boolean }> = [
+    { label: '开仓时间', value: formatChinaTime(trade.open_timestamp, true), wide: true },
     { label: '开仓价', value: formatPrice(trade.open_rate, places) },
     { label: '现价', value: formatPrice(mark, places) },
     { label: '数量', value: formatNumber(trade.amount, trade.amount_precision ?? 4) },
@@ -56,7 +57,7 @@ function PositionCard({ trade, stake, moneyDigits, onOpen }: { trade: Trade; sta
         </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
           {fields.map((field) => (
-            <div key={field.label} className="min-w-0">
+            <div key={field.label} className={field.wide ? 'col-span-2 min-w-0 sm:col-span-3' : 'min-w-0'}>
               <dt className="text-xs text-muted-foreground">{field.label}</dt>
               <dd className="truncate font-mono text-sm">{field.value}</dd>
             </div>
