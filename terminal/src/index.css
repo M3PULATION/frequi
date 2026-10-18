@@ -2,11 +2,13 @@
 @import 'tw-animate-css';
 @import 'shadcn/tailwind.css';
 @import '@fontsource-variable/inter';
+@import '@fontsource-variable/schibsted-grotesk';
 
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
   --font-heading: var(--font-sans);
+  --font-brand: 'Schibsted Grotesk Variable', 'Inter Variable', sans-serif;
   --font-sans: 'Inter Variable', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'Inter Variable', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);

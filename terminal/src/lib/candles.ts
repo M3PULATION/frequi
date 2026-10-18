@@ -33,6 +33,8 @@ export type TradeMarker = {
   shape: 'arrowUp' | 'arrowDown' | 'circle';
   text?: string;
   size?: number;
+  /** Entry and exit marks are drawn as chart badges. Other markers stay on the series. */
+  kind?: 'entry' | 'exit';
 };
 
 export type MarkerOrder = {
@@ -208,14 +210,7 @@ function barByTime(bars: CandleBar[], time: number): CandleBar | undefined {
   return bars.find((bar) => bar.time === time);
 }
 
-/** Keep the marker outside the wick, not on the candle body. */
-function priceOutsideCandle(bar: CandleBar, place: 'above' | 'below'): number {
-  const span = Math.max(bar.high - bar.low, bar.close * 0.004);
-  const pad = span * 1.8;
-  return place === 'above' ? bar.high + pad : bar.low - pad;
-}
-
-/** Entry and exit sit beyond the candle: longs below, shorts above. */
+/** Entry and exit anchor on the wick. The chart offsets them in pixels so they stay clear of the candle. */
 export function markersForTrades(trades: ChartTradePoint[], bars: CandleBar[]): TradeMarker[] {
   const markers: TradeMarker[] = [];
   for (const trade of trades) {
@@ -223,13 +218,15 @@ export function markersForTrades(trades: ChartTradePoint[], bars: CandleBar[]): 
     const entryBar = entryTime == null ? undefined : barByTime(bars, entryTime);
     if (entryBar && trade.open_rate > 0) {
       const above = Boolean(trade.is_short);
+      const open = trade.is_open !== false;
       markers.push({
         time: entryBar.time,
-        position: 'atPriceMiddle',
-        price: priceOutsideCandle(entryBar, above ? 'above' : 'below'),
+        position: above ? 'aboveBar' : 'belowBar',
+        price: above ? entryBar.high : entryBar.low,
         color: above ? DOWN : UP,
         shape: above ? 'arrowDown' : 'arrowUp',
-        size: 0.55,
+        text: open ? (above ? '开空' : '开多') : undefined,
+        kind: 'entry',
       });
     }
     const exitAt = closeSeconds(trade);
@@ -239,11 +236,11 @@ export function markersForTrades(trades: ChartTradePoint[], bars: CandleBar[]): 
       const above = !trade.is_short;
       markers.push({
         time: exitBar.time,
-        position: 'atPriceMiddle',
-        price: priceOutsideCandle(exitBar, above ? 'above' : 'below'),
-        color: '#8b909a',
+        position: above ? 'aboveBar' : 'belowBar',
+        price: above ? exitBar.high : exitBar.low,
+        color: '#c5c8ce',
         shape: 'circle',
-        size: 0.35,
+        kind: 'exit',
       });
     }
   }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { barsFromCandles, candleTimeframe, markersForOrders, unixSeconds, type PairCandleResponse } from './candles';
+import { barsFromCandles, candleTimeframe, markersForOrders, markersForTrades, unixSeconds, type PairCandleResponse } from './candles';
 
 const payload: PairCandleResponse = {
   pair: 'ABC/USDC:USDC',
@@ -53,6 +53,55 @@ describe('markersForOrders', () => {
     });
     expect(markers).toEqual([
       { time: 1_700_000_000, position: 'aboveBar', color: '#ff5470', shape: 'arrowDown', text: '开空' },
+    ]);
+  });
+});
+
+describe('markersForTrades', () => {
+  it('labels an open short above the wick and leaves closed entries unlabeled', () => {
+    const { bars } = barsFromCandles(payload);
+    const markers = markersForTrades(
+      [
+        { trade_id: 7, is_open: true, is_short: true, open_rate: 11, open_timestamp: 1_700_000_060 },
+        {
+          trade_id: 1,
+          is_open: false,
+          is_short: false,
+          open_rate: 10,
+          open_timestamp: 1_700_000_000,
+          close_rate: 9,
+          close_timestamp: 1_700_000_300,
+        },
+      ],
+      bars,
+    );
+    expect(markers).toEqual([
+      {
+        time: 1_700_000_000,
+        position: 'belowBar',
+        price: 9,
+        color: '#3fd68b',
+        shape: 'arrowUp',
+        text: undefined,
+        kind: 'entry',
+      },
+      {
+        time: 1_700_000_000,
+        position: 'aboveBar',
+        price: 12,
+        color: '#ff5470',
+        shape: 'arrowDown',
+        text: '开空',
+        kind: 'entry',
+      },
+      {
+        time: 1_700_000_300,
+        position: 'aboveBar',
+        price: 11,
+        color: '#c5c8ce',
+        shape: 'circle',
+        kind: 'exit',
+      },
     ]);
   });
 });

@@ -17,6 +17,7 @@ import { useEffect, useRef } from 'react';
 
 import type { CandleBar, TradeMarker, VolumeBar } from '@/lib/candles';
 import { formatChinaChartTime, pricePrecision } from '@/lib/format';
+import { TradeMarksPrimitive } from '@/components/tradeMarks';
 
 export type ChartPriceLine = {
   price: number;
@@ -42,6 +43,7 @@ type ChartHandles = {
   candles: ISeriesApi<'Candlestick'>;
   volume: ISeriesApi<'Histogram'>;
   markers: ISeriesMarkersPluginApi<Time>;
+  tradeMarks: TradeMarksPrimitive;
   priceLines: IPriceLine[];
   bars: CandleBar[];
   volumeBars: VolumeBar[];
@@ -116,12 +118,15 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
       { priceFormat: { type: 'volume' } },
       1,
     );
+    const tradeMarks = new TradeMarksPrimitive();
+    candles.attachPrimitive(tradeMarks);
     chart.panes()[1]?.setHeight(72);
     handlesRef.current = {
       chart,
       candles,
       volume: volumeSeries,
       markers: createSeriesMarkers(candles, []),
+      tradeMarks,
       priceLines: [],
       bars: [],
       volumeBars: [],
@@ -158,7 +163,7 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
       if (bar.high > high) high = bar.high;
     }
     if (Number.isFinite(low) && Number.isFinite(high)) {
-      const pad = Math.max((high - low) * 0.12, high * 0.002);
+      const pad = Math.max((high - low) * 0.2, high * 0.002);
       handles.candles.applyOptions({
         autoscaleInfoProvider: () => ({
           priceRange: { minValue: low - pad, maxValue: high + pad },
@@ -167,16 +172,27 @@ export function CandleChart({ pair, timeframe, bars, volume, markers, priceLines
     }
     if (!hadBars && candleData.length > 0) {
       const last = candleData.length - 1;
-      handles.chart.timeScale().setVisibleLogicalRange({
-        from: Math.max(0, last - 140),
-        to: last + 2,
-      });
+      let from = Math.max(0, last - 140);
+      const entryTime = markers.reduce<number | null>((earliest, marker) => {
+        if (marker.kind !== 'entry' || !marker.text) return earliest;
+        return earliest == null ? marker.time : Math.min(earliest, marker.time);
+      }, null);
+      if (entryTime != null) {
+        const entryIndex = bars.findIndex((bar) => bar.time >= entryTime);
+        if (entryIndex >= 0) {
+          const padded = Math.max(0, entryIndex - 16);
+          if (last - padded <= 400) from = Math.min(from, padded);
+        }
+      }
+      handles.chart.timeScale().setVisibleLogicalRange({ from, to: last + 2 });
     }
     handles.chart.panes()[1]?.setHeight(72);
     handles.bars = bars;
     handles.volumeBars = volume;
+    handles.tradeMarks.setMarks(markers.filter((marker) => marker.kind));
     const seriesMarkers: SeriesMarker<Time>[] = [];
     for (const marker of markers) {
+      if (marker.kind) continue;
       const time = asTime(marker.time);
       if (marker.position === 'atPriceMiddle' && marker.price != null) {
         seriesMarkers.push({
