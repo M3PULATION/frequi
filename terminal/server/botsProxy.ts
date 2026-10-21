@@ -26,6 +26,40 @@ type Session = {
 };
 
 const READONLY_POST = new Set(['/api/v1/pair_candles', '/api/v1/pair_history']);
+/** Refresh the access token this long before it expires, so a probe does not trip on 401. */
+export const ACCESS_TOKEN_SKEW_MS = 60_000;
+/** Successful catalog stays warm. A miss is retried sooner so a bot can come back. */
+export const CATALOG_SUCCESS_MS = 60_000;
+export const CATALOG_FAILURE_MS = 15_000;
+/** A failed probe keeps the last good reading, instead of clearing the strategy immediately. */
+export const CATALOG_GRACE_MS = 3 * 60_000;
+
+export function jwtExpiryMs(token: string): number | null {
+  const part = token.split('.')[1];
+  if (!part) return null;
+  try {
+    const body = JSON.parse(Buffer.from(part, 'base64url').toString('utf8')) as { exp?: unknown };
+    return typeof body.exp === 'number' ? body.exp * 1000 : null;
+  } catch {
+    return null;
+  }
+}
+
+export function accessTokenUsable(token: string, now = Date.now(), skewMs = ACCESS_TOKEN_SKEW_MS): boolean {
+  const exp = jwtExpiryMs(token);
+  if (exp == null) return false;
+  return exp - now > skewMs;
+}
+
+export function catalogTtl(listed: ListedBot[]): number {
+  return listed.length > 0 && listed.every((bot) => bot.online) ? CATALOG_SUCCESS_MS : CATALOG_FAILURE_MS;
+}
+
+/** Keep the previous strategy through a blip. After the grace window the bot is offline, but the name stays. */
+export function describeFallback(previous: { at: number; listed: ListedBot }, now: number): ListedBot {
+  if (now - previous.at < CATALOG_GRACE_MS) return previous.listed;
+  return { ...previous.listed, online: false };
+}
 
 function basicAuth(username: string, password: string): string {
   return `Basic ${Buffer.from(`${username}:${password}`, 'utf8').toString('base64')}`;
@@ -80,7 +114,10 @@ export function createBotProxy(configPath: string) {
   const bots = loadBotConfigs(readFileSync(configPath, 'utf8'));
   const byId = new Map(bots.map((bot) => [bot.id, bot]));
   const sessions = new Map<string, Session>();
-  let catalog: { at: number; bots: ListedBot[] } | null = null;
+  const renewing = new Map<string, Promise<Session>>();
+  const remembered = new Map<string, { at: number; listed: ListedBot }>();
+  let catalog: { at: number; ttl: number; bots: ListedBot[] } | null = null;
+  let catalogFlight: Promise<ListedBot[]> | null = null;
 
   async function login(bot: BotConfig): Promise<Session> {
     const response = await fetch(`${bot.origin}/api/v1/token/login`, {
@@ -118,40 +155,86 @@ export function createBotProxy(configPath: string) {
     return next;
   }
 
-  async function sessionFor(bot: BotConfig): Promise<Session> {
-    return sessions.get(bot.id) ?? login(bot);
+  function ensureSession(bot: BotConfig, force = false): Promise<Session> {
+    if (force) {
+      const current = sessions.get(bot.id);
+      if (current) sessions.set(bot.id, { ...current, access: '' });
+    }
+    const cached = sessions.get(bot.id);
+    if (!force && cached && accessTokenUsable(cached.access)) return Promise.resolve(cached);
+    const existing = renewing.get(bot.id);
+    if (existing) return existing;
+    const task = (async () => {
+      const current = sessions.get(bot.id);
+      if (current?.refresh) {
+        try {
+          return await refresh(bot, current);
+        } catch {
+          sessions.delete(bot.id);
+        }
+      }
+      return login(bot);
+    })().finally(() => {
+      if (renewing.get(bot.id) === task) renewing.delete(bot.id);
+    });
+    renewing.set(bot.id, task);
+    return task;
   }
 
-  async function describe(bot: BotConfig): Promise<ListedBot> {
-    try {
-      const session = await sessionFor(bot);
-      const response = await fetch(`${bot.origin}/api/v1/show_config`, {
+  async function readConfig(bot: BotConfig): Promise<ListedBot> {
+    const load = (session: Session) =>
+      fetch(`${bot.origin}/api/v1/show_config`, {
         headers: { Authorization: `Bearer ${session.access}` },
         signal: AbortSignal.timeout(12_000),
       });
-      if (!response.ok) throw new Error(String(response.status));
-      const config = (await response.json()) as { strategy?: string; bot_name?: string };
-      const strategy = config.strategy || '';
-      const botName = config.bot_name || '';
-      return {
-        id: bot.id,
-        name: bot.name,
-        strategy,
-        botName,
-        host: bot.host,
-        online: true,
-      };
+    let session = await ensureSession(bot);
+    let response = await load(session);
+    if (response.status === 401) {
+      session = await ensureSession(bot, true);
+      response = await load(session);
+    }
+    if (!response.ok) throw new Error(String(response.status));
+    const config = (await response.json()) as { strategy?: string; bot_name?: string };
+    return {
+      id: bot.id,
+      name: bot.name,
+      strategy: config.strategy || '',
+      botName: config.bot_name || '',
+      host: bot.host,
+      online: true,
+    };
+  }
+
+  async function describe(bot: BotConfig): Promise<{ listed: ListedBot; live: boolean }> {
+    try {
+      const listed = await readConfig(bot);
+      remembered.set(bot.id, { at: Date.now(), listed });
+      return { listed, live: true };
     } catch {
-      sessions.delete(bot.id);
-      return { id: bot.id, name: bot.name, strategy: '', botName: '', host: bot.host, online: false };
+      const previous = remembered.get(bot.id);
+      if (previous) return { listed: describeFallback(previous, Date.now()), live: false };
+      return {
+        listed: { id: bot.id, name: bot.name, strategy: '', botName: '', host: bot.host, online: false },
+        live: false,
+      };
     }
   }
 
-  async function listBots(): Promise<ListedBot[]> {
-    if (catalog && Date.now() - catalog.at < 60_000) return catalog.bots;
-    const listed = await Promise.all(bots.map((bot) => describe(bot)));
-    catalog = { at: Date.now(), bots: listed };
-    return listed;
+  function listBots(): Promise<ListedBot[]> {
+    const now = Date.now();
+    if (catalog && now - catalog.at < catalog.ttl) return Promise.resolve(catalog.bots);
+    if (catalogFlight) return catalogFlight;
+    catalogFlight = Promise.all(bots.map((bot) => describe(bot)))
+      .then((probed) => {
+        const listed = probed.map((item) => item.listed);
+        const carried = probed.some((item) => !item.live);
+        catalog = { at: Date.now(), ttl: carried ? CATALOG_FAILURE_MS : catalogTtl(listed), bots: listed };
+        return listed;
+      })
+      .finally(() => {
+        catalogFlight = null;
+      });
+    return catalogFlight;
   }
 
   async function forward(req: IncomingMessage, res: ServerResponse, bot: BotConfig) {
@@ -177,10 +260,10 @@ export function createBotProxy(configPath: string) {
         signal: AbortSignal.timeout(25_000),
       });
 
-    let session = await sessionFor(bot);
+    let session = await ensureSession(bot);
     let upstream = await send(session);
     if (upstream.status === 401) {
-      session = await refresh(bot, session);
+      session = await ensureSession(bot, true);
       upstream = await send(session);
     }
     const payload = Buffer.from(await upstream.arrayBuffer());
@@ -196,6 +279,7 @@ export function createBotProxy(configPath: string) {
       void listBots()
         .then((listed) => {
           res.setHeader('Content-Type', 'application/json');
+          res.setHeader('Cache-Control', 'no-store');
           res.end(JSON.stringify(listed));
         })
         .catch((error: unknown) => {
