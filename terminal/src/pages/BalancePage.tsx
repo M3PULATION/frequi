@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo } from 'react';
 
+import { fetchBalance } from '@/api/bot';
 import { fetchHistoricBalance } from '@/api/insights';
 import { BalanceLineChart } from '@/components/BalanceLineChart';
 import { PageHeader } from '@/components/PageHeader';
@@ -9,17 +10,27 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatNumber, formatPlainRatio, visibleInterval } from '@/lib/format';
+import { ARCHIVE_STALE_MS, LIVE_POLL_MS, formatNumber, formatPlainRatio, visibleInterval } from '@/lib/format';
 import { balancePoints } from '@/lib/wallet';
 
 export function BalancePage() {
-  const { balance, balanceLoading, balanceError, client, bot } = useTerminal();
+  const { client, bot } = useTerminal();
+  const balanceQuery = useQuery({
+    queryKey: ['bot', bot.id, 'balance'],
+    queryFn: () => fetchBalance(client),
+    staleTime: LIVE_POLL_MS,
+    refetchInterval: visibleInterval(LIVE_POLL_MS),
+  });
   const historyQuery = useQuery({
     queryKey: ['bot', bot.id, 'historic-balance'],
     queryFn: () => fetchHistoricBalance(client),
     retry: 0,
-    refetchInterval: visibleInterval(30_000),
+    staleTime: ARCHIVE_STALE_MS,
+    refetchOnWindowFocus: false,
   });
+  const balance = balanceQuery.data;
+  const balanceLoading = balanceQuery.isLoading;
+  const balanceError = errorMessage(balanceQuery.error);
   const points = useMemo(() => (historyQuery.data ? balancePoints(historyQuery.data) : []), [historyQuery.data]);
   const currencies = (balance?.currencies ?? []).filter((row) => row.is_bot_managed || row.is_position || row.balance !== 0);
 

@@ -12,22 +12,25 @@ import { Button } from '@/components/ui/button';
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useListedBots, type ListedBot } from '@/hooks/useListedBots';
-import { formatNumber, formatPercentPoints, formatPlainRatio, formatSignedNumber, profitTone, visibleInterval } from '@/lib/format';
-import { overviewFromSnapshot, type BotOverview, type BotSnapshot } from '@/lib/overview';
+import { ARCHIVE_STALE_MS, OVERVIEW_POLL_MS, formatNumber, formatPercentPoints, formatPlainRatio, formatSignedNumber, profitTone, visibleInterval } from '@/lib/format';
+import { overviewFromSnapshot, type BotOverview } from '@/lib/overview';
 import { cn } from '@/lib/utils';
 import { balancePoints, indexedReturn } from '@/lib/wallet';
 
 const COLORS = ['#97fce4', '#3fd68b', '#ffd25f', '#ff5470', '#7eb6ff', '#50d2c1'];
 
-async function fetchSnapshot(botId: string): Promise<BotSnapshot> {
-  const client = createApiClient({ getBotId: () => botId });
-  const [config, profit, balance, trades] = await Promise.all([
-    fetchConfig(client).catch(() => null),
-    fetchProfit(client).catch(() => null),
-    fetchBalance(client).catch(() => null),
-    fetchOpenTrades(client).catch(() => null),
-  ]);
-  return { config, profit, balance, trades };
+function clientFor(botId: string) {
+  return createApiClient({ getBotId: () => botId });
+}
+
+function polled<T>(bots: ListedBot[], name: string, load: (botId: string) => Promise<T>) {
+  return bots.map((bot) => ({
+    queryKey: ['bot', bot.id, name] as const,
+    queryFn: () => load(bot.id),
+    enabled: bot.online,
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
+  }));
 }
 
 function money(value: number | null, stake: string | null, digits = 2): string {
@@ -107,25 +110,35 @@ export function BotsPage() {
   const [hidden, setHidden] = useState<Set<string>>(() => new Set());
   const histories = useQueries({
     queries: bots.map((bot) => ({
-      queryKey: ['overview-balance', bot.id],
-      queryFn: () => fetchHistoricBalance(createApiClient({ getBotId: () => bot.id })),
+      queryKey: ['bot', bot.id, 'historic-balance'] as const,
+      queryFn: () => fetchHistoricBalance(clientFor(bot.id)),
       enabled: bot.online,
-      staleTime: 60_000,
+      staleTime: ARCHIVE_STALE_MS,
+      refetchOnWindowFocus: false,
     })),
   });
-  const snapshots = useQueries({
-    queries: bots.map((bot: ListedBot) => ({
-      queryKey: ['bot-overview', bot.id],
-      queryFn: () => fetchSnapshot(bot.id),
-      enabled: bot.online,
-      staleTime: 15_000,
-      refetchInterval: visibleInterval(15_000),
-    })),
-  });
+  const configs = useQueries({ queries: polled(bots, 'config', (id) => fetchConfig(clientFor(id))) });
+  const profits = useQueries({ queries: polled(bots, 'profit', (id) => fetchProfit(clientFor(id))) });
+  const balances = useQueries({ queries: polled(bots, 'balance', (id) => fetchBalance(clientFor(id))) });
+  const openTrades = useQueries({ queries: polled(bots, 'status', (id) => fetchOpenTrades(clientFor(id))) });
 
-  const updated = `${histories.map((query) => query.dataUpdatedAt).join(',')}:${snapshots.map((query) => query.dataUpdatedAt).join(',')}`;
+  const updated = [
+    histories.map((query) => query.dataUpdatedAt).join(','),
+    configs.map((query) => query.dataUpdatedAt).join(','),
+    profits.map((query) => query.dataUpdatedAt).join(','),
+    balances.map((query) => query.dataUpdatedAt).join(','),
+    openTrades.map((query) => query.dataUpdatedAt).join(','),
+  ].join(':');
   const overviews = useMemo(
-    () => bots.map((bot, index) => overviewFromSnapshot(bot, snapshots[index]?.data)),
+    () =>
+      bots.map((bot, index) =>
+        overviewFromSnapshot(bot, {
+          config: configs[index]?.data ?? null,
+          profit: profits[index]?.data ?? null,
+          balance: balances[index]?.data ?? null,
+          trades: openTrades[index]?.data ?? null,
+        }),
+      ),
     [bots, updated],
   );
   const onlineCount = bots.filter((bot) => bot.online).length;
@@ -159,7 +172,14 @@ export function BotsPage() {
       {overviews.length > 0 ? (
         <div className="grid gap-3 lg:grid-cols-2">
           {overviews.map((bot, index) => (
-            <BotCard key={bot.id} bot={bot} loading={Boolean(bots[index]?.online && snapshots[index]?.isLoading)} />
+            <BotCard
+              key={bot.id}
+              bot={bot}
+              loading={Boolean(
+                bots[index]?.online &&
+                  (configs[index]?.isLoading || profits[index]?.isLoading || balances[index]?.isLoading || openTrades[index]?.isLoading),
+              )}
+            />
           ))}
         </div>
       ) : null}

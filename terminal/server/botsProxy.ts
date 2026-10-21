@@ -148,7 +148,7 @@ export function createBotProxy(configPath: string) {
   }
 
   async function listBots(): Promise<ListedBot[]> {
-    if (catalog && Date.now() - catalog.at < 10_000) return catalog.bots;
+    if (catalog && Date.now() - catalog.at < 60_000) return catalog.bots;
     const listed = await Promise.all(bots.map((bot) => describe(bot)));
     catalog = { at: Date.now(), bots: listed };
     return listed;

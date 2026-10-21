@@ -1,5 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 
+import { CATALOG_POLL_MS, visibleInterval } from '@/lib/format';
+
 export type ListedBot = {
   id: string;
   name: string;
@@ -17,6 +19,7 @@ export function useListedBots() {
       if (!response.ok) throw new Error('无法读取实盘列表');
       return (await response.json()) as ListedBot[];
     },
-    refetchInterval: 15_000,
+    staleTime: CATALOG_POLL_MS,
+    refetchInterval: visibleInterval(CATALOG_POLL_MS),
   });
 }

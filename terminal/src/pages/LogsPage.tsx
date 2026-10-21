@@ -1,12 +1,15 @@
+import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
+import { fetchLogs } from '@/api/bot';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
+import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatChinaTime } from '@/lib/format';
+import { LOG_POLL_MS, formatChinaTime, visibleInterval } from '@/lib/format';
 
 const LEVEL_ORDER = ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'];
 
@@ -18,7 +21,16 @@ function levelVariant(level: string): 'destructive' | 'outline' | 'secondary' {
 }
 
 export function LogsPage() {
-  const { logs, logsLoading, logsError } = useTerminal();
+  const { client, bot } = useTerminal();
+  const logsQuery = useQuery({
+    queryKey: ['bot', bot.id, 'logs'],
+    queryFn: () => fetchLogs(client),
+    staleTime: LOG_POLL_MS,
+    refetchInterval: visibleInterval(LOG_POLL_MS),
+  });
+  const logs = logsQuery.data?.logs ?? [];
+  const logsLoading = logsQuery.isLoading;
+  const logsError = errorMessage(logsQuery.error);
   const [hidden, setHidden] = useState<Set<string>>(() => new Set(['INFO']));
   const recent = logs.slice(-200).reverse();
   const levels = [...new Set(recent.map((line) => line[3].toUpperCase()))].sort(

@@ -8,7 +8,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatChinaTime, visibleInterval } from '@/lib/format';
+import { OVERVIEW_POLL_MS, formatChinaTime, visibleInterval } from '@/lib/format';
 
 function PairBadges({ title, pairs, method }: { title: string; pairs: string[]; method?: string[] }) {
   return (
@@ -37,17 +37,20 @@ export function PairsPage() {
   const whitelistQuery = useQuery({
     queryKey: ['bot', bot.id, 'whitelist'],
     queryFn: () => fetchWhitelist(client),
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const blacklistQuery = useQuery({
     queryKey: ['bot', bot.id, 'blacklist'],
     queryFn: () => fetchBlacklist(client),
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const locksQuery = useQuery({
     queryKey: ['bot', bot.id, 'locks'],
     queryFn: () => fetchLocks(client),
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
 
   return (

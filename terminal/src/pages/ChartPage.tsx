@@ -1,8 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, Navigate, useNavigate, useParams } from 'react-router';
 
 import { fetchPairCandles } from '@/api/candles';
-import { fetchTradeHistory, fetchWhitelist } from '@/api/insights';
+import { fetchWhitelist, loadTradeWindow } from '@/api/insights';
 import { CandleChart, type ChartPriceLine } from '@/components/CandleChart';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
@@ -10,7 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
 import { barsFromCandles, candleTimeframe, markersForTrades } from '@/lib/candles';
-import { CANDLE_POLL_MS, formatNumber, formatPercentPoints, fractionDigits, profitTone, visibleInterval } from '@/lib/format';
+import { CANDLE_POLL_MS, CHART_HISTORY_POLL_MS, formatNumber, formatPercentPoints, fractionDigits, profitTone, visibleInterval } from '@/lib/format';
+import { latestTradeRange } from '@/lib/trades';
 import { candleLimitForTrades } from '@/lib/levels';
 import { useMemo } from 'react';
 
@@ -24,16 +25,19 @@ export function ChartPage() {
   const timeframe =
     candleTimeframe(terminal.config?.timeframe, trade?.timeframe) ??
     (terminal.config?.timeframe && /^\d+[mhdwM]$/.test(terminal.config.timeframe) ? terminal.config.timeframe : null);
+  const queryClient = useQueryClient();
+  const totalKey = ['bot', terminal.bot.id, 'trade-total'] as const;
   const historyQuery = useQuery({
     queryKey: ['bot', terminal.bot.id, 'chart-trades'],
     queryFn: async () => {
-      const head = await fetchTradeHistory(terminal.client, 500, 0);
-      if (head.total_trades <= head.trades.length) return head.trades;
-      const start = Math.max(0, head.total_trades - 500);
-      const tail = await fetchTradeHistory(terminal.client, head.total_trades - start, start);
-      return tail.trades;
+      const known = queryClient.getQueryData<number>(totalKey) ?? null;
+      const window = await loadTradeWindow(terminal.client, (total) => latestTradeRange(total, 500), known);
+      queryClient.setQueryData(totalKey, window.total);
+      return window.trades;
     },
-    refetchInterval: visibleInterval(30_000),
+    staleTime: CHART_HISTORY_POLL_MS,
+    refetchInterval: visibleInterval(CHART_HISTORY_POLL_MS),
+    refetchOnWindowFocus: false,
   });
   const historyPair = useMemo(() => {
     const latest = [...(historyQuery.data ?? [])].sort(
@@ -42,7 +46,7 @@ export function ChartPage() {
     return latest?.pair ?? null;
   }, [historyQuery.data]);
   const whitelistQuery = useQuery({
-    queryKey: ['bot', terminal.bot.id, 'chart-whitelist'],
+    queryKey: ['bot', terminal.bot.id, 'whitelist'],
     queryFn: () => fetchWhitelist(terminal.client),
     enabled: tradesReady && !trade && !historyPair,
   });
