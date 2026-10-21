@@ -158,5 +158,11 @@ export function visibleInterval(ms: number): () => number | false {
 }
 
 export const FAST_POLL_MS = 3_000;
-export const SLOW_POLL_MS = 15_000;
 export const CANDLE_POLL_MS = 10_000;
+export const LOG_POLL_MS = 15_000;
+export const LIVE_POLL_MS = 30_000;
+export const OVERVIEW_POLL_MS = 60_000;
+export const CONFIG_POLL_MS = 5 * 60_000;
+export const CATALOG_POLL_MS = 60_000;
+export const ARCHIVE_STALE_MS = 5 * 60_000;
+export const CHART_HISTORY_POLL_MS = 120_000;

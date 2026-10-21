@@ -1,7 +1,7 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Fragment, useState } from 'react';
 
-import { fetchTradeCustomData, fetchTradeHistory } from '@/api/insights';
+import { fetchTradeCustomData, loadTradeWindow } from '@/api/insights';
 import { PageHeader } from '@/components/PageHeader';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -10,7 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatChinaTime, formatNumber, formatPercentPoints, formatSignedNumber, parseUtcDate, profitTone, visibleInterval } from '@/lib/format';
+import { OVERVIEW_POLL_MS, formatChinaTime, formatNumber, formatPercentPoints, formatSignedNumber, parseUtcDate, profitTone, visibleInterval } from '@/lib/format';
+import { tradePageRange } from '@/lib/trades';
 import type { ClosedTrade } from '@/types';
 
 const PAGE_SIZE = 20;
@@ -90,23 +91,20 @@ function TradeDetail({ trade }: { trade: ClosedTrade }) {
 
 export function HistoryPage() {
   const { client, bot } = useTerminal();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
   const [openId, setOpenId] = useState<number | null>(null);
+  const totalKey = ['bot', bot.id, 'trade-total'] as const;
   const historyQuery = useQuery({
     queryKey: ['bot', bot.id, 'trades', page],
     queryFn: async () => {
-      const head = await fetchTradeHistory(client, PAGE_SIZE, 0);
-      const total = head.total_trades;
-      const start = Math.max(0, total - (page + 1) * PAGE_SIZE);
-      const end = Math.max(start, total - page * PAGE_SIZE);
-      if (end === start) return { ...head, total_trades: total, trades: [] };
-      const slice =
-        start === 0 && end <= head.trades.length
-          ? head.trades.slice(start, end)
-          : (await fetchTradeHistory(client, end - start, start)).trades;
-      return { ...head, total_trades: total, trades: newestFirst(slice) };
+      const known = queryClient.getQueryData<number>(totalKey) ?? null;
+      const window = await loadTradeWindow(client, (total) => tradePageRange(total, page, PAGE_SIZE), known);
+      queryClient.setQueryData(totalKey, window.total);
+      return { trades: newestFirst(window.trades), total_trades: window.total };
     },
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const total = historyQuery.data?.total_trades ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));

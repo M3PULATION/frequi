@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 
 import { AppShell } from '@/components/AppShell';
 import { TooltipProvider } from '@/components/ui/tooltip';
@@ -18,37 +18,43 @@ import { useListedBots } from '@/hooks/useListedBots';
 import { documentTitle } from '@/lib/title';
 import { useSession } from '@/stores/session';
 
+function useHydratedSession() {
+  const [hydrated, setHydrated] = useState(() => useSession.persist.hasHydrated());
+  useEffect(() => {
+    if (useSession.persist.hasHydrated()) {
+      setHydrated(true);
+      return;
+    }
+    return useSession.persist.onFinishHydration(() => setHydrated(true));
+  }, []);
+  return hydrated;
+}
+
 function useSelectedListedBot() {
+  const hydrated = useHydratedSession();
   const selectedId = useSession((state) => state.selectedId);
   const selectBot = useSession((state) => state.selectBot);
   const catalog = useListedBots();
   const bot = catalog.data?.find((item) => item.id === selectedId) ?? null;
+  const fallback = catalog.data?.find((item) => item.online) ?? catalog.data?.[0] ?? null;
   useEffect(() => {
-    if (bot || !catalog.data?.length) return;
-    const next = catalog.data.find((item) => item.online) ?? catalog.data[0];
-    if (next) selectBot(next.id);
-  }, [bot, catalog.data, selectBot]);
-  return { catalog, bot };
+    if (!hydrated || bot || !fallback) return;
+    selectBot(fallback.id);
+  }, [hydrated, bot, fallback, selectBot]);
+  return { catalog, hydrated, bot: hydrated ? (bot ?? fallback) : null };
 }
 
-function SessionShell() {
-  const { catalog, bot } = useSelectedListedBot();
+function AppLayout() {
+  const { catalog, hydrated, bot } = useSelectedListedBot();
+  const location = useLocation();
   useEffect(() => {
     if (!bot) document.title = documentTitle('/bots');
   }, [bot]);
-  if (catalog.isLoading) return <p className="p-6 text-sm text-muted-foreground">正在读取实盘列表…</p>;
-  if (!bot) return <BotsPage />;
-  return (
-    <TerminalProvider>
-      <AppShell />
-    </TerminalProvider>
-  );
-}
-
-function RequireSession() {
-  const { catalog, bot } = useSelectedListedBot();
-  if (catalog.isLoading) return <p className="p-6 text-sm text-muted-foreground">正在读取实盘列表…</p>;
-  if (!bot) return <Navigate to="/bots" replace />;
+  if (!hydrated || catalog.isLoading) return <p className="p-6 text-sm text-muted-foreground">正在读取实盘列表…</p>;
+  if (!bot) {
+    if (location.pathname !== '/bots') return <Navigate to="/bots" replace />;
+    return <BotsPage />;
+  }
   return (
     <TerminalProvider>
       <AppShell />
@@ -63,6 +69,7 @@ export function App() {
         defaultOptions: {
           queries: {
             retry: 1,
+            staleTime: 15_000,
             refetchOnWindowFocus: true,
           },
         },
@@ -75,10 +82,8 @@ export function App() {
         <BrowserRouter>
           <Routes>
             <Route path="/login" element={<Navigate to="/bots" replace />} />
-            <Route element={<SessionShell />}>
+            <Route element={<AppLayout />}>
               <Route path="bots" element={<BotsPage />} />
-            </Route>
-            <Route element={<RequireSession />}>
               <Route index element={<Navigate to="/positions" replace />} />
               <Route path="positions" element={<PositionsPage />} />
               <Route path="history" element={<HistoryPage />} />

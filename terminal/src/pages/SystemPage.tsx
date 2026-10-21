@@ -6,19 +6,22 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatNumber, formatRatio, visibleInterval } from '@/lib/format';
+import { ARCHIVE_STALE_MS, LIVE_POLL_MS, formatNumber, formatRatio, visibleInterval } from '@/lib/format';
 
 export function SystemPage() {
   const { client, bot, config } = useTerminal();
   const sysQuery = useQuery({
     queryKey: ['bot', bot.id, 'sysinfo'],
     queryFn: () => fetchSysInfo(client),
-    refetchInterval: visibleInterval(15_000),
+    staleTime: LIVE_POLL_MS,
+    refetchInterval: visibleInterval(LIVE_POLL_MS),
   });
   const plotQuery = useQuery({
     queryKey: ['bot', bot.id, 'plot-config'],
     queryFn: () => fetchPlotConfig(client),
     retry: 0,
+    staleTime: ARCHIVE_STALE_MS,
+    refetchOnWindowFocus: false,
   });
   const rows = config
     ? [

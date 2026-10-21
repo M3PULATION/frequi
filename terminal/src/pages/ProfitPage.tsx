@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 
+import { fetchProfit } from '@/api/bot';
 import { fetchAllTrades, fetchEntryStats, fetchExitStats, fetchHistoricBalance, fetchMixTagStats, fetchPerformance, fetchProfitAll, fetchTimeSummary } from '@/api/insights';
 import { MetricList, type MetricItem } from '@/components/MetricList';
 import { PageHeader } from '@/components/PageHeader';
@@ -12,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { errorMessage } from '@/hooks/useBotClient';
 import { useTerminal } from '@/hooks/useTerminal';
-import { formatChinaTime, formatDurationSeconds, formatHold, formatNumber, formatPlainRatio, formatRatio, formatSignedNumber, profitTone, visibleInterval } from '@/lib/format';
+import { ARCHIVE_STALE_MS, LIVE_POLL_MS, OVERVIEW_POLL_MS, formatChinaTime, formatDurationSeconds, formatHold, formatNumber, formatPlainRatio, formatRatio, formatSignedNumber, profitTone, visibleInterval } from '@/lib/format';
 import { dailyRisk, equityRisk, recoveryFactor, tradeRisk } from '@/lib/risk';
 import { balancePoints } from '@/lib/wallet';
 import type { ProfitStats } from '@/types';
@@ -42,59 +43,79 @@ function sideRow(label: string, item: ProfitStats | undefined, stake: string) {
   return { label, item, stake };
 }
 
+const archiveQuery = {
+  staleTime: ARCHIVE_STALE_MS,
+  refetchOnWindowFocus: false,
+} as const;
+
 export function ProfitPage() {
-  const { profit, profitLoading, profitError, config, client, bot } = useTerminal();
+  const { config, client, bot } = useTerminal();
   const [period, setPeriod] = useState<(typeof periods)[number]['id']>('daily');
   const selected = periods.find((item) => item.id === period) ?? periods[0];
+  const profitQuery = useQuery({
+    queryKey: ['bot', bot.id, 'profit'],
+    queryFn: () => fetchProfit(client),
+    staleTime: LIVE_POLL_MS,
+    refetchInterval: visibleInterval(LIVE_POLL_MS),
+  });
   const profitAllQuery = useQuery({
     queryKey: ['bot', bot.id, 'profit-all'],
     queryFn: () => fetchProfitAll(client),
     retry: 0,
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const summaryQuery = useQuery({
     queryKey: ['bot', bot.id, 'summary', period],
     queryFn: () => fetchTimeSummary(client, period, selected.timescale),
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const performanceQuery = useQuery({
     queryKey: ['bot', bot.id, 'performance'],
     queryFn: () => fetchPerformance(client),
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const entriesQuery = useQuery({
     queryKey: ['bot', bot.id, 'entries'],
     queryFn: () => fetchEntryStats(client),
     retry: 0,
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const exitsQuery = useQuery({
     queryKey: ['bot', bot.id, 'exits'],
     queryFn: () => fetchExitStats(client),
     retry: 0,
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const mixQuery = useQuery({
     queryKey: ['bot', bot.id, 'mix-tags'],
     queryFn: () => fetchMixTagStats(client),
     retry: 0,
-    refetchInterval: visibleInterval(30_000),
+    staleTime: OVERVIEW_POLL_MS,
+    refetchInterval: visibleInterval(OVERVIEW_POLL_MS),
   });
   const dailyQuery = useQuery({
     queryKey: ['bot', bot.id, 'summary', 'daily', 365],
     queryFn: () => fetchTimeSummary(client, 'daily', 365),
-    refetchInterval: visibleInterval(30_000),
+    ...archiveQuery,
   });
   const historyQuery = useQuery({
     queryKey: ['bot', bot.id, 'all-trades'],
     queryFn: () => fetchAllTrades(client),
-    refetchInterval: visibleInterval(30_000),
+    ...archiveQuery,
   });
   const walletQuery = useQuery({
     queryKey: ['bot', bot.id, 'historic-balance'],
     queryFn: () => fetchHistoricBalance(client),
-    refetchInterval: visibleInterval(30_000),
+    ...archiveQuery,
   });
+  const profit = profitQuery.data;
+  const profitLoading = profitQuery.isLoading;
+  const profitError = errorMessage(profitQuery.error);
   const stake = config?.stake_currency ?? '';
   const derived = useMemo(() => {
     const daily = dailyQuery.data ? dailyRisk(dailyQuery.data.data, profit?.bot_start_date) : null;

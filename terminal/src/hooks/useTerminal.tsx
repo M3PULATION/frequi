@@ -1,14 +1,14 @@
 import { useQuery } from '@tanstack/react-query';
 import { createContext, useContext, type ReactNode } from 'react';
 
-import { fetchBalance, fetchConfig, fetchLogs, fetchPing, fetchProfit } from '@/api/bot';
+import { fetchConfig } from '@/api/bot';
 import type { ApiClient } from '@/api/client';
 import { fetchOpenTrades } from '@/api/trades';
 import { errorMessage, useBotClient } from '@/hooks/useBotClient';
 import { useListedBots, type ListedBot } from '@/hooks/useListedBots';
-import { FAST_POLL_MS, SLOW_POLL_MS, visibleInterval } from '@/lib/format';
+import { CONFIG_POLL_MS, FAST_POLL_MS, visibleInterval } from '@/lib/format';
 import { useSession } from '@/stores/session';
-import type { Balance, BotState, LogLine, ProfitStats, Trade } from '@/types';
+import type { BotState, Trade } from '@/types';
 
 type TerminalContextValue = {
   bot: ListedBot;
@@ -19,15 +19,6 @@ type TerminalContextValue = {
   trades: Trade[];
   tradesLoading: boolean;
   tradesError: string | null;
-  profit: ProfitStats | undefined;
-  profitLoading: boolean;
-  profitError: string | null;
-  balance: Balance | undefined;
-  balanceLoading: boolean;
-  balanceError: string | null;
-  logs: LogLine[];
-  logsLoading: boolean;
-  logsError: string | null;
   dataUpdatedAt: number | null;
 };
 
@@ -45,65 +36,34 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     queryKey: ['bot', botId, 'config'],
     queryFn: () => fetchConfig(client),
     enabled,
-    refetchInterval: visibleInterval(SLOW_POLL_MS),
-  });
-  const pingQuery = useQuery({
-    queryKey: ['bot', botId, 'ping'],
-    queryFn: () => fetchPing(client),
-    enabled,
-    retry: 0,
-    refetchInterval: visibleInterval(SLOW_POLL_MS),
+    staleTime: CONFIG_POLL_MS,
+    refetchInterval: visibleInterval(CONFIG_POLL_MS),
   });
   const tradesQuery = useQuery({
     queryKey: ['bot', botId, 'status'],
     queryFn: () => fetchOpenTrades(client),
     enabled,
+    staleTime: FAST_POLL_MS,
     refetchInterval: visibleInterval(FAST_POLL_MS),
-  });
-  const profitQuery = useQuery({
-    queryKey: ['bot', botId, 'profit'],
-    queryFn: () => fetchProfit(client),
-    enabled,
-    refetchInterval: visibleInterval(FAST_POLL_MS),
-  });
-  const balanceQuery = useQuery({
-    queryKey: ['bot', botId, 'balance'],
-    queryFn: () => fetchBalance(client),
-    enabled,
-    refetchInterval: visibleInterval(SLOW_POLL_MS),
-  });
-  const logsQuery = useQuery({
-    queryKey: ['bot', botId, 'logs'],
-    queryFn: () => fetchLogs(client),
-    enabled,
-    refetchInterval: visibleInterval(SLOW_POLL_MS),
   });
 
   if (!bot) return null;
 
-  const dataUpdatedAt = [tradesQuery, profitQuery, balanceQuery, logsQuery, configQuery, pingQuery].reduce<number | null>(
+  const dataUpdatedAt = [tradesQuery, configQuery].reduce<number | null>(
     (latest, query) => (query.dataUpdatedAt > 0 && (latest == null || query.dataUpdatedAt > latest) ? query.dataUpdatedAt : latest),
     null,
   );
+  const online = tradesQuery.isPending ? 'checking' : tradesQuery.isError ? 'offline' : 'online';
 
   const value: TerminalContextValue = {
     bot,
     client,
     config: configQuery.data,
     configError: errorMessage(configQuery.error),
-    online: pingQuery.isPending ? 'checking' : pingQuery.data?.status === 'pong' ? 'online' : 'offline',
+    online,
     trades: tradesQuery.data ?? [],
     tradesLoading: tradesQuery.isLoading,
     tradesError: errorMessage(tradesQuery.error),
-    profit: profitQuery.data,
-    profitLoading: profitQuery.isLoading,
-    profitError: errorMessage(profitQuery.error),
-    balance: balanceQuery.data,
-    balanceLoading: balanceQuery.isLoading,
-    balanceError: errorMessage(balanceQuery.error),
-    logs: logsQuery.data?.logs ?? [],
-    logsLoading: logsQuery.isLoading,
-    logsError: errorMessage(logsQuery.error),
     dataUpdatedAt,
   };
 
