@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 
 import { CATALOG_POLL_MS, visibleInterval } from '@/lib/format';
 
@@ -21,5 +21,6 @@ export function useListedBots() {
     },
     staleTime: CATALOG_POLL_MS,
     refetchInterval: visibleInterval(CATALOG_POLL_MS),
+    placeholderData: keepPreviousData,
   });
 }

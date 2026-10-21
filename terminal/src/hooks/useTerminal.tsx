@@ -53,7 +53,9 @@ export function TerminalProvider({ children }: { children: ReactNode }) {
     (latest, query) => (query.dataUpdatedAt > 0 && (latest == null || query.dataUpdatedAt > latest) ? query.dataUpdatedAt : latest),
     null,
   );
-  const online = tradesQuery.isPending ? 'checking' : tradesQuery.isError ? 'offline' : 'online';
+  const reached = configQuery.isSuccess || tradesQuery.isSuccess;
+  const waiting = configQuery.isPending || tradesQuery.isPending;
+  const online = reached ? 'online' : waiting ? 'checking' : 'offline';
 
   const value: TerminalContextValue = {
     bot,
