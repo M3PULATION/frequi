@@ -95,10 +95,24 @@ export function loadBotConfigs(raw: string): BotConfig[] {
   });
 }
 
+/** The only POST bodies we forward are small candle/history queries. */
+export const MAX_BODY_BYTES = 64 * 1024;
+
+export class BodyTooLargeError extends Error {}
+
 function readBody(req: IncomingMessage): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
+    let size = 0;
+    req.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_BODY_BYTES) {
+        req.removeAllListeners('data');
+        reject(new BodyTooLargeError('请求体过大'));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
@@ -303,6 +317,14 @@ export function createBotProxy(configPath: string) {
     }
     void forward(req, res, bot).catch((error: unknown) => {
       if (res.headersSent) return;
+      if (error instanceof BodyTooLargeError) {
+        res.statusCode = 413;
+        res.setHeader('Content-Type', 'application/json');
+        res.setHeader('Connection', 'close');
+        // Answer first, then drop the connection so the unread body is not buffered.
+        res.end(JSON.stringify({ detail: error.message }), () => req.destroy());
+        return;
+      }
       res.statusCode = 502;
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({ detail: error instanceof Error ? error.message : '实盘不可达' }));

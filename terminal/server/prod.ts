@@ -24,7 +24,16 @@ const mime: Record<string, string> = {
 
 function serveStatic(req: IncomingMessage, res: ServerResponse) {
   const url = new URL(req.url || '/', 'http://localhost');
-  const requested = normalize(decodeURIComponent(url.pathname)).replace(/^(\.\.(\/|\\|$))+/, '');
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(url.pathname);
+  } catch {
+    // Malformed percent-encoding (e.g. "/%") must not throw out of the request handler.
+    res.statusCode = 400;
+    res.end();
+    return;
+  }
+  const requested = normalize(decoded).replace(/^(\.\.(\/|\\|$))+/, '');
   let file = resolve(dist, requested.replace(/^[/\\]/, ''));
   const root = resolve(dist);
   if (file !== root && !file.startsWith(root + sep)) {
