@@ -4,6 +4,7 @@ import {
   DEFAULT_ADMIN_PATH,
   ADMIN_MAX_FAILURES,
   BOTS_KV_KEY,
+  adminPathConflict,
   constantTimeEqual,
   handleRequest,
   loadBotConfigs,
@@ -39,6 +40,11 @@ function nextIp(): string {
 
 function sampleConfig(name = '示例机器人', password = PASSWORD): string {
   return JSON.stringify([{ name, url: 'http://127.0.0.1:9', username: 'freqtrader', password }]);
+}
+
+function token(expSeconds: number): string {
+  const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString('base64url');
+  return `x.${body}.y`;
 }
 
 function envFor(kv?: FakeKV, extra: Partial<WorkerEnv> = {}): WorkerEnv {
@@ -480,5 +486,132 @@ describe('admin helpers', () => {
     }
     expect(message).toBeTruthy();
     expect(message).not.toContain('LeakMe999');
+  });
+});
+
+describe('reserved path conflicts', () => {
+  it('detects equal, prefix and nested admin paths but not look-alikes', () => {
+    expect(adminPathConflict('/api')).toBe('/api');
+    expect(adminPathConflict('/local')).toBe('/local');
+    expect(adminPathConflict('/healthz')).toBe('/healthz');
+
+    // A prefix of a reserved path, before or after normalization.
+    expect(adminPathConflict('/ap')).toBe('/api');
+    expect(adminPathConflict('api')).toBe('/api');
+    expect(adminPathConflict('/api/')).toBe('/api');
+
+    // An admin path inside a reserved namespace, whose fallback would swallow
+    // part of the proxy.
+    expect(adminPathConflict('/api/v1')).toBe('/api');
+    expect(adminPathConflict('/local/private')).toBe('/local');
+
+    // Different routes that merely share characters are valid.
+    expect(adminPathConflict('/apiary')).toBeNull();
+    expect(adminPathConflict('/localbots')).toBeNull();
+    expect(adminPathConflict('/healthz-backup')).toBeNull();
+    expect(adminPathConflict('/admin')).toBeNull();
+    expect(adminPathConflict('/my-private-entry')).toBeNull();
+    expect(adminPathConflict(undefined)).toBeNull();
+    expect(adminPathConflict('')).toBeNull();
+  });
+
+  it('keeps proxy, bot list and healthz routes working under every conflicting path', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('offline');
+    }));
+
+    for (const adminPath of ['/api', '/local', '/healthz']) {
+      const kv = new FakeKV();
+      kv.data.set(BOTS_KV_KEY, sampleConfig(`保留路由 ${adminPath}`));
+      const env = envFor(kv, { ADMIN_PATH: adminPath });
+
+      const health = await handleRequest(new Request('http://terminal.test/healthz'), env);
+      expect(health.status).toBe(200);
+      expect(await health.json()).toEqual({ ok: true });
+
+      const listed = await handleRequest(new Request('http://terminal.test/local/bots'), env);
+      expect(listed.status).toBe(200);
+      expect(Array.isArray(await listed.json())).toBe(true);
+
+      // The exact reproduction: this used to be swallowed by the admin fallback.
+      const proxied = await handleRequest(
+        new Request('http://terminal.test/api/v1/show_config', { headers: { 'x-ft-bot': 'missing' } }),
+        env,
+      );
+      expect(proxied.status).toBe(400);
+      expect(await proxied.json()).toEqual({ detail: '未知实盘' });
+    }
+  });
+
+  it('forwards /api/* to the selected bot when ADMIN_PATH=/api', async () => {
+    const raw = sampleConfig('转发测试');
+    const kv = new FakeKV();
+    kv.data.set(BOTS_KV_KEY, raw);
+    const id = loadBotConfigs(raw)[0]!.id;
+    const now = Math.floor(Date.now() / 1000);
+    const calls: string[] = [];
+
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      calls.push(url);
+      if (url.endsWith('/api/v1/token/login')) {
+        return Response.json({ access_token: token(now + 600), refresh_token: 'refresh-1' });
+      }
+      if (url.endsWith('/api/v1/show_config')) {
+        return Response.json({ strategy: 'ProxyStrategy' });
+      }
+      return new Response(null, { status: 404 });
+    }));
+
+    const response = await handleRequest(
+      new Request('http://terminal.test/api/v1/show_config', { headers: { 'x-ft-bot': id } }),
+      envFor(kv, { ADMIN_PATH: '/api' }),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ strategy: 'ProxyStrategy' });
+    expect(calls.some((url) => url.endsWith('/api/v1/show_config'))).toBe(true);
+  });
+
+  it('answers on the misconfigured admin path with an explicit 503', async () => {
+    const api = await handleRequest(
+      new Request('http://terminal.test/api'),
+      envFor(new FakeKV(), { ADMIN_PATH: '/api' }),
+    );
+    expect(api.status).toBe(503);
+    const apiBody = (await api.json()) as { detail: string; hint: string };
+    expect(apiBody.detail).toContain('ADMIN_PATH');
+    expect(apiBody.hint).toContain('/api');
+    expect(apiBody.hint).toContain('wrangler.jsonc');
+
+    // The admin API of a /local entry is unreachable, but /local/bots is not.
+    const localApi = await handleRequest(
+      new Request('http://terminal.test/local/api/config'),
+      envFor(new FakeKV(), { ADMIN_PATH: '/local' }),
+    );
+    expect(localApi.status).toBe(503);
+
+    // /healthz keeps serving health; only the admin API under it is disabled.
+    const env = envFor(new FakeKV(), { ADMIN_PATH: '/healthz' });
+    expect((await handleRequest(new Request('http://terminal.test/healthz'), env)).status).toBe(200);
+    const healthApi = await handleRequest(new Request('http://terminal.test/healthz/api/config'), env);
+    expect(healthApi.status).toBe(503);
+  });
+
+  it('keeps the admin page and API working for normal and look-alike paths', async () => {
+    for (const adminPath of ['/admin', '/my-private-entry', '/apiary']) {
+      const kv = new FakeKV();
+      kv.data.set(BOTS_KV_KEY, sampleConfig());
+      const env = envFor(kv, { ADMIN_PATH: adminPath });
+
+      const page = await handleRequest(new Request(`http://terminal.test${adminPath}`), env);
+      expect(page.status).toBe(200);
+      const html = await page.text();
+      expect(html).toContain('实盘配置管理');
+      expect(html).toContain(`${adminPath}/api/config`);
+
+      const config = await adminCall(`${adminPath}/api/config`, env);
+      expect(config.status).toBe(200);
+      expect(((await config.json()) as { source: string }).source).toBe('kv');
+    }
   });
 });

@@ -69,6 +69,13 @@ const READONLY_POST = new Set(['/api/v1/pair_candles', '/api/v1/pair_history']);
 export const DEFAULT_ADMIN_PATH = '/admin';
 
 /**
+ * Paths the worker always owns. The admin entry must not overlap them: its
+ * generic prefix branch would otherwise swallow proxy requests (this is what
+ * happened with ADMIN_PATH=/api, where `/api/v1/show_config` returned 404).
+ */
+export const RESERVED_PATHS = ['/api', '/local', '/healthz'] as const;
+
+/**
  * Normalize a configured admin path: trim whitespace, add a missing leading
  * slash, and drop trailing slashes. An empty value falls back to the default.
  * Exported so the rule can be unit tested directly.
@@ -79,6 +86,26 @@ export function normalizeAdminPath(input?: string | null): string {
   const withLeadingSlash = value.startsWith('/') ? value : `/${value}`;
   const trimmed = withLeadingSlash.replace(/\/+$/, '');
   return trimmed || DEFAULT_ADMIN_PATH;
+}
+
+/**
+ * Return the reserved path an admin entry collides with, or null when it is
+ * safe. Two shapes collide:
+ *
+ * - the admin path is a prefix of a reserved path (`/api` and `/ap`, while
+ *   `/apiary` is not because it extends `/api` instead of being a prefix);
+ * - the admin path lives inside a reserved namespace (`/api/v1`), whose
+ *   generic admin fallback would swallow that part of the proxy.
+ *
+ * The comparison is path-aware: `/apiary` shares characters with `/api` but
+ * is a different route, so it stays valid.
+ */
+export function adminPathConflict(input?: string | null): string | null {
+  const base = normalizeAdminPath(input);
+  for (const reserved of RESERVED_PATHS) {
+    if (reserved.startsWith(base) || base.startsWith(`${reserved}/`)) return reserved;
+  }
+  return null;
 }
 
 /** Refresh the access token this long before it expires, so a probe does not trip on 401. */
@@ -422,6 +449,23 @@ async function putAdminConfig(request: Request, env: WorkerEnv): Promise<Respons
   return json({ ok: true }, 200, NO_STORE);
 }
 
+/**
+ * A conflicting ADMIN_PATH disables the admin page rather than silently
+ * falling back to /admin: the deployer must know its configuration was
+ * rejected. The reserved routes themselves are matched before this response,
+ * so they keep working under any ADMIN_PATH.
+ */
+function adminPathConflictResponse(adminBase: string, reserved: string): Response {
+  return json(
+    {
+      detail: 'ADMIN_PATH 与保留路径冲突，管理页已禁用',
+      hint: `ADMIN_PATH=${adminBase} 与 ${reserved} 冲突，请修改 wrangler.jsonc 中的 vars.ADMIN_PATH`,
+    },
+    503,
+    NO_STORE,
+  );
+}
+
 function adminPage(base: string): Response {
   return new Response(adminPageHtml(base), {
     status: 200,
@@ -687,30 +731,13 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
   const pathname = decodedPathname(url);
   const adminBase = normalizeAdminPath(env.ADMIN_PATH);
+  const adminConflict = adminPathConflict(adminBase);
 
+  // Reserved routes come first, so an overlapping ADMIN_PATH can never shadow
+  // them. This is the core of the fix: with ADMIN_PATH=/api the admin prefix
+  // branch used to swallow every /api/* request.
   if (pathname === '/healthz') {
     return json({ ok: true }, 200, { 'Cache-Control': 'no-store' });
-  }
-
-  // The page itself is public and contains no config; every API call is guarded.
-  if (pathname === adminBase || pathname === `${adminBase}/`) return adminPage(adminBase);
-
-  if (pathname === `${adminBase}/api/config`) {
-    const denied = adminDenied(request, env);
-    if (denied) return denied;
-    if (request.method === 'GET') return getAdminConfig(env);
-    if (request.method === 'PUT') return putAdminConfig(request, env);
-    return json({ detail: '方法不支持' }, 405, NO_STORE);
-  }
-
-  if (pathname.startsWith(`${adminBase}/api/`)) {
-    const denied = adminDenied(request, env);
-    if (denied) return denied;
-    return json({ detail: '未找到' }, 404, NO_STORE);
-  }
-
-  if (pathname.startsWith(`${adminBase}/`)) {
-    return json({ detail: '未找到' }, 404, NO_STORE);
   }
 
   if (pathname.startsWith('/local/bots')) {
@@ -734,6 +761,37 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
       if (error instanceof BadRequestError) return json({ detail: error.message }, 400);
       return json({ detail: error instanceof Error ? error.message : '实盘不可达' }, 502);
     }
+  }
+
+  if (adminConflict) {
+    // Admin routing is disabled. The reserved branches above already won any
+    // overlap, so these paths are unambiguously the misconfigured admin entry.
+    if (pathname === adminBase || pathname.startsWith(`${adminBase}/`)) {
+      return adminPathConflictResponse(adminBase, adminConflict);
+    }
+    if (env.ASSETS) return env.ASSETS.fetch(request);
+    return new Response('Not Found', { status: 404 });
+  }
+
+  // The page itself is public and contains no config; every API call is guarded.
+  if (pathname === adminBase || pathname === `${adminBase}/`) return adminPage(adminBase);
+
+  if (pathname === `${adminBase}/api/config`) {
+    const denied = adminDenied(request, env);
+    if (denied) return denied;
+    if (request.method === 'GET') return getAdminConfig(env);
+    if (request.method === 'PUT') return putAdminConfig(request, env);
+    return json({ detail: '方法不支持' }, 405, NO_STORE);
+  }
+
+  if (pathname.startsWith(`${adminBase}/api/`)) {
+    const denied = adminDenied(request, env);
+    if (denied) return denied;
+    return json({ detail: '未找到' }, 404, NO_STORE);
+  }
+
+  if (pathname.startsWith(`${adminBase}/`)) {
+    return json({ detail: '未找到' }, 404, NO_STORE);
   }
 
   if (env.ASSETS) return env.ASSETS.fetch(request);

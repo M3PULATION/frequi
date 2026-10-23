@@ -15,7 +15,9 @@
     // This static list cannot read vars.ADMIN_PATH, so it must be kept in sync
     // by hand: if you change ADMIN_PATH above, change the two admin entries
     // here to the same path (both the bare path and the "/*" variant).
-    "run_worker_first": ["/api/*", "/local/*", "/healthz", "/admin", "/admin/*"]
+    // The bare /api and /local entries let the worker answer an ADMIN_PATH
+    // conflict explicitly instead of letting Assets serve the SPA.
+    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/admin", "/admin/*"]
   },
   "kv_namespaces": [
     // Placeholder: create the namespace with
