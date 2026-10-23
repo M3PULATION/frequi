@@ -1,5 +1,7 @@
 # 实盘操作台
 
+[![CI](https://github.com/M3PULATION/frequi/actions/workflows/ci.yml/badge.svg)](https://github.com/M3PULATION/frequi/actions/workflows/ci.yml)
+
 只读的 Freqtrade 实盘终端,给需要向投资人、朋友或第三方展示实盘的人使用。浏览器只能看:所有写操作都在 Worker 层被拒绝,机器人凭据只保存在服务端。
 
 本项目运行在 Cloudflare Workers 上:Worker 负责认证、会话与只读转发,Workers Assets 提供前端,机器人与管理令牌存在 KV 与 Worker Secret 中。
