@@ -4,7 +4,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:worker": "wrangler dev",
     "build": "tsc --noEmit && vite build",
+    "deploy:worker": "wrangler deploy",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
     "start": "node --experimental-strip-types server/prod.ts",
     "preview": "vite preview",
     "test": "vitest run"
@@ -29,6 +32,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^5.20261016.1",
     "@tailwindcss/vite": "^4.1.14",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
@@ -36,6 +40,7 @@
     "tailwindcss": "^4.1.14",
     "typescript": "~5.9.3",
     "vite": "^7.1.10",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "wrangler": "^4.151.0"
   }
 }

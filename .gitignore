@@ -3,6 +3,8 @@ node_modules
 dist
 terminal/dist
 terminal/bots.local.json
+terminal/.dev.vars
+terminal/.wrangler/
 
 .env.local
 .env.*.local
