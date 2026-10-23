@@ -5,13 +5,31 @@
  * same frontend can be served either by the Node container or by Workers.
  */
 
-type BotConfig = {
+import { ADMIN_PAGE } from './adminPage';
+
+export type BotConfig = {
   id: string;
   name: string;
   origin: string;
   host: string;
   username: string;
   password: string;
+};
+
+/** The subset of KVNamespace this worker needs. Keeps the tests free of Workers types. */
+export type BotKV = {
+  get(key: string): Promise<string | null>;
+  put(key: string, value: string): Promise<void>;
+};
+
+export type BotSource = 'kv' | 'secret' | 'none';
+
+/** Shape returned to the browser: credentials are never included. */
+export type AdminBot = {
+  name: string;
+  url: string;
+  username: string;
+  password: null;
 };
 
 export type ListedBot = {
@@ -31,6 +49,10 @@ type Session = {
 export type WorkerEnv = {
   /** JSON array in the same shape as bots.example.json. */
   BOTS_CONFIG?: string;
+  /** KV namespace holding the editable config under the `bots` key. */
+  BOTS_KV?: BotKV;
+  /** Bearer token for /admin/api/*. */
+  ADMIN_TOKEN?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 };
 
@@ -44,6 +66,11 @@ export const CATALOG_FAILURE_MS = 15_000;
 export const CATALOG_GRACE_MS = 3 * 60_000;
 /** POST bodies are limited to freqtrade candle queries; anything larger is rejected. */
 export const MAX_BODY_BYTES = 64 * 1024;
+/** KV reads are cached for this long so /api/* does not pay for a read per request. */
+export const CONFIG_CACHE_MS = 5_000;
+export const ADMIN_MAX_FAILURES = 10;
+export const ADMIN_FAILURE_WINDOW_MS = 5 * 60_000;
+export const BOTS_KV_KEY = 'bots';
 
 class BadRequestError extends Error {}
 
@@ -126,16 +153,246 @@ export function loadBotConfigs(raw: string): BotConfig[] {
   });
 }
 
+/** Strip credentials before a config ever reaches a response body. */
+export function sanitizeBots(bots: BotConfig[]): AdminBot[] {
+  return bots.map((bot) => ({
+    name: bot.name,
+    url: bot.origin,
+    username: bot.username,
+    password: null,
+  }));
+}
+
+/**
+ * Merge the editor payload with the current config. Passwords are matched by
+ * array index because the browser never receives them. `null`, `undefined` and
+ * an empty string all mean "keep the existing password".
+ */
+export function resolveAdminBots(input: unknown, previous: BotConfig[]): BotConfig[] {
+  if (!Array.isArray(input)) throw new BadRequestError('bots 必须是数组');
+
+  const merged = input.map((item, index) => {
+    const position = index + 1;
+    if (!item || typeof item !== 'object' || Array.isArray(item)) {
+      throw new BadRequestError(`第 ${position} 台实盘格式无效`);
+    }
+    const bot = item as Record<string, unknown>;
+    if (typeof bot.name !== 'string' || !bot.name.trim()) {
+      throw new BadRequestError(`第 ${position} 台实盘缺少 name`);
+    }
+    if (typeof bot.url !== 'string' || !bot.url.trim()) {
+      throw new BadRequestError(`第 ${position} 台实盘缺少 url`);
+    }
+    if (typeof bot.username !== 'string' || !bot.username) {
+      throw new BadRequestError(`第 ${position} 台实盘缺少 username`);
+    }
+
+    let password: string;
+    if (typeof bot.password === 'string' && bot.password.length > 0) {
+      password = bot.password;
+    } else if (bot.password == null || bot.password === '') {
+      const existing = previous[index];
+      if (!existing) throw new BadRequestError(`第 ${position} 台实盘缺少 password`);
+      password = existing.password;
+    } else {
+      throw new BadRequestError(`第 ${position} 台实盘的 password 格式无效`);
+    }
+
+    const candidate = { name: bot.name, url: bot.url, username: bot.username, password };
+    try {
+      // Reuse the runtime validation, including URL normalization.
+      return loadBotConfigs(JSON.stringify([candidate]))[0]!;
+    } catch {
+      // Never echo JSON.parse / URL errors: they may quote the raw entry.
+      throw new BadRequestError(`第 ${position} 台实盘配置无效`);
+    }
+  });
+
+  return merged;
+}
+
+/** Compare secrets without short-circuiting on the first mismatch. */
+export function constantTimeEqual(a: string, b: string): boolean {
+  const length = Math.max(a.length, b.length);
+  let diff = a.length ^ b.length;
+  for (let i = 0; i < length; i += 1) {
+    diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  }
+  return diff === 0;
+}
+
 export function isReadOnly(method: string, path: string): boolean {
   if (method === 'GET' || method === 'HEAD') return true;
   if (method === 'POST' && READONLY_POST.has(path)) return true;
   return false;
 }
 
+const NO_STORE = { 'Cache-Control': 'no-store' };
+
 function json(data: unknown, status = 200, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(data), {
     status,
     headers: { 'Content-Type': 'application/json', ...headers },
+  });
+}
+
+type KvCacheEntry = { at: number; raw: string | null };
+/** Per-isolate KV cache. WeakMap keys keep tests (and dev hot reloads) isolated. */
+const kvCache = new WeakMap<BotKV, KvCacheEntry>();
+
+async function kvRaw(env: WorkerEnv, now: number): Promise<string | null> {
+  const kv = env.BOTS_KV;
+  if (!kv) return null;
+  const cached = kvCache.get(kv);
+  if (cached && now - cached.at < CONFIG_CACHE_MS) return cached.raw;
+
+  let raw: string | null = null;
+  try {
+    const value = await kv.get(BOTS_KV_KEY);
+    if (typeof value === 'string' && value.trim()) raw = value;
+  } catch {
+    // A KV outage should not take the terminal down; fall back to the secret.
+    raw = null;
+  }
+  kvCache.set(kv, { at: now, raw });
+  return raw;
+}
+
+async function resolveConfig(env: WorkerEnv, now = Date.now()): Promise<{ raw: string | null; source: BotSource }> {
+  const fromKv = await kvRaw(env, now);
+  if (fromKv) return { raw: fromKv, source: 'kv' };
+  const secret = env.BOTS_CONFIG;
+  if (typeof secret === 'string' && secret.trim()) return { raw: secret, source: 'secret' };
+  return { raw: null, source: 'none' };
+}
+
+type FailureEntry = { count: number; resetAt: number };
+const adminFailures = new Map<string, FailureEntry>();
+
+function clientIp(request: Request): string {
+  return request.headers.get('cf-connecting-ip') || 'unknown';
+}
+
+function recordFailure(ip: string, now: number): void {
+  const current = adminFailures.get(ip);
+  if (!current || now >= current.resetAt) {
+    adminFailures.set(ip, { count: 1, resetAt: now + ADMIN_FAILURE_WINDOW_MS });
+  } else {
+    current.count += 1;
+  }
+  if (adminFailures.size > 256) {
+    for (const [key, value] of adminFailures) {
+      if (now >= value.resetAt) adminFailures.delete(key);
+    }
+  }
+}
+
+/** Returns null when the request may proceed, otherwise the rejection response. */
+function adminDenied(request: Request, env: WorkerEnv, now = Date.now()): Response | null {
+  const expected = env.ADMIN_TOKEN;
+  if (typeof expected !== 'string' || expected.length === 0) {
+    return json(
+      { detail: '未配置管理令牌', hint: '请运行 npx wrangler secret put ADMIN_TOKEN 设置令牌' },
+      503,
+      NO_STORE,
+    );
+  }
+
+  const ip = clientIp(request);
+  const failure = adminFailures.get(ip);
+  if (failure && now < failure.resetAt && failure.count >= ADMIN_MAX_FAILURES) {
+    return json({ detail: '尝试次数过多，请稍后再试' }, 429, NO_STORE);
+  }
+
+  const header = request.headers.get('authorization') || '';
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  const supplied = match ? match[1]! : '';
+  if (constantTimeEqual(supplied, expected)) {
+    adminFailures.delete(ip);
+    return null;
+  }
+
+  recordFailure(ip, now);
+  return json({ detail: '令牌无效' }, 401, NO_STORE);
+}
+
+async function getAdminConfig(env: WorkerEnv): Promise<Response> {
+  const { raw, source } = await resolveConfig(env);
+  if (!raw) return json({ bots: [], source: 'none' }, 200, NO_STORE);
+
+  let bots: BotConfig[];
+  try {
+    bots = loadBotConfigs(raw);
+  } catch {
+    return json({ detail: '当前配置格式无效' }, 500, NO_STORE);
+  }
+  return json({ bots: sanitizeBots(bots), source }, 200, NO_STORE);
+}
+
+async function putAdminConfig(request: Request, env: WorkerEnv): Promise<Response> {
+  const kv = env.BOTS_KV;
+  if (!kv) {
+    return json(
+      { detail: '未配置 KV 存储', hint: '请在 wrangler.jsonc 中绑定 BOTS_KV' },
+      503,
+      NO_STORE,
+    );
+  }
+
+  const read = await readLimitedBody(request);
+  if (!read.ok) return json({ detail: '请求体过大' }, 413, NO_STORE);
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(read.body ?? new Uint8Array()));
+  } catch {
+    return json({ detail: '请求体不是有效的 JSON' }, 400, NO_STORE);
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return json({ detail: '请求体格式无效' }, 400, NO_STORE);
+  }
+
+  const { raw } = await resolveConfig(env);
+  let previous: BotConfig[] = [];
+  if (raw) {
+    try {
+      previous = loadBotConfigs(raw);
+    } catch {
+      previous = [];
+    }
+  }
+
+  let bots: BotConfig[];
+  try {
+    bots = resolveAdminBots((payload as { bots?: unknown }).bots, previous);
+  } catch (error) {
+    const detail = error instanceof BadRequestError ? error.message : '配置无效';
+    return json({ detail }, 400, NO_STORE);
+  }
+
+  const stored = bots.map((bot) => ({
+    name: bot.name,
+    url: bot.origin,
+    username: bot.username,
+    password: bot.password,
+  }));
+  await kv.put(BOTS_KV_KEY, JSON.stringify(stored));
+  kvCache.delete(kv);
+  currentState = null;
+
+  return json({ ok: true }, 200, NO_STORE);
+}
+
+function adminPage(): Response {
+  return new Response(ADMIN_PAGE, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
   });
 }
 
@@ -368,9 +625,9 @@ function createProxyState(raw: string): ProxyState {
 
 let currentState: ProxyState | null = null;
 
-function stateFor(env: WorkerEnv): ProxyState {
-  const raw = env.BOTS_CONFIG;
-  if (typeof raw !== 'string' || !raw.trim()) throw new BadRequestError('未配置 BOTS_CONFIG');
+async function stateFor(env: WorkerEnv): Promise<ProxyState> {
+  const { raw } = await resolveConfig(env);
+  if (!raw) throw new BadRequestError('未配置 BOTS_CONFIG');
   if (currentState?.raw === raw) return currentState;
   const next = createProxyState(raw);
   currentState = next;
@@ -395,8 +652,29 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
     return json({ ok: true }, 200, { 'Cache-Control': 'no-store' });
   }
 
+  // The page itself is public and contains no config; every API call is guarded.
+  if (pathname === '/admin' || pathname === '/admin/') return adminPage();
+
+  if (pathname === '/admin/api/config') {
+    const denied = adminDenied(request, env);
+    if (denied) return denied;
+    if (request.method === 'GET') return getAdminConfig(env);
+    if (request.method === 'PUT') return putAdminConfig(request, env);
+    return json({ detail: '方法不支持' }, 405, NO_STORE);
+  }
+
+  if (pathname.startsWith('/admin/api/')) {
+    const denied = adminDenied(request, env);
+    if (denied) return denied;
+    return json({ detail: '未找到' }, 404, NO_STORE);
+  }
+
+  if (pathname.startsWith('/admin/')) {
+    return json({ detail: '未找到' }, 404, NO_STORE);
+  }
+
   if (pathname.startsWith('/local/bots')) {
-    const state = stateFor(env);
+    const state = await stateFor(env);
     try {
       const listed = await state.listBots();
       return json(listed, 200, { 'Cache-Control': 'no-store' });
@@ -406,7 +684,7 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   }
 
   if (pathname.startsWith('/api/')) {
-    const state = stateFor(env);
+    const state = await stateFor(env);
     const id = request.headers.get('x-ft-bot');
     const bot = id ? state.botFor(id) : undefined;
     if (!bot) return json({ detail: '未知实盘' }, 400);

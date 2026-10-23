@@ -41,6 +41,20 @@ npx wrangler secret put BOTS_CONFIG
 
 生产环境不要把真实凭据写进仓库或 `wrangler.jsonc`。
 
+## 网页管理配置(KV)
+
+配置优先从 KV namespace `BOTS_KV` 的 `bots` key 读取；KV 里没有值时回退到 Secret `BOTS_CONFIG`。因此旧部署升级后不会立刻失效。
+
+在浏览器打开 `/admin` 即可编辑机器人列表。密码不会下发到浏览器：页面显示为空，留空保存表示沿用原密码。保存后写入 KV，本 isolate 会立即刷新缓存；其他 isolate 最多 5 秒后可见。
+
+先设置管理令牌(令牌值由部署方自行决定，不要提交到仓库):
+
+```bash
+npx wrangler secret put ADMIN_TOKEN
+```
+
+`/admin` 页面本身可以公开访问(只包含表单，不含任何配置)，但 `/admin/api/*` 必须携带 `Authorization: Bearer <token>`。同一 isolate 内同一 IP 连续失败 10 次后会被限制 5 分钟。
+
 ## 本地体验
 
 本地开发可以用 `.dev.vars`(不要提交)提供配置：

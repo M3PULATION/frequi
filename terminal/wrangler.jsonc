@@ -7,6 +7,9 @@
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/local/*", "/healthz"]
-  }
+    "run_worker_first": ["/api/*", "/local/*", "/healthz", "/admin", "/admin/*"]
+  },
+  "kv_namespaces": [
+    { "binding": "BOTS_KV", "id": "<your-kv-namespace-id>" }
+  ]
 }
