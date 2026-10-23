@@ -5,7 +5,7 @@
  * same frontend can be served either by the Node container or by Workers.
  */
 
-import { ADMIN_PAGE } from './adminPage';
+import { adminPageHtml } from './adminPage';
 
 export type BotConfig = {
   id: string;
@@ -51,12 +51,17 @@ export type WorkerEnv = {
   BOTS_CONFIG?: string;
   /** KV namespace holding the editable config under the `bots` key. */
   BOTS_KV?: BotKV;
-  /** Bearer token for /admin/api/*. */
+  /** Bearer token for the admin API. */
   ADMIN_TOKEN?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 };
 
 const READONLY_POST = new Set(['/api/v1/pair_candles', '/api/v1/pair_history']);
+/**
+ * Private path that serves the config page and prefixes its API. It is not
+ * advertised anywhere: the page must not be linked from the public terminal.
+ */
+export const ADMIN_BASE = '/my-private-entry';
 /** Refresh the access token this long before it expires, so a probe does not trip on 401. */
 export const ACCESS_TOKEN_SKEW_MS = 60_000;
 /** Successful catalog stays warm. A miss is retried sooner so a bot can come back. */
@@ -401,7 +406,7 @@ async function putAdminConfig(request: Request, env: WorkerEnv): Promise<Respons
 }
 
 function adminPage(): Response {
-  return new Response(ADMIN_PAGE, {
+  return new Response(adminPageHtml(ADMIN_BASE), {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
@@ -670,9 +675,9 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   }
 
   // The page itself is public and contains no config; every API call is guarded.
-  if (pathname === '/admin' || pathname === '/admin/') return adminPage();
+  if (pathname === ADMIN_BASE || pathname === `${ADMIN_BASE}/`) return adminPage();
 
-  if (pathname === '/admin/api/config') {
+  if (pathname === `${ADMIN_BASE}/api/config`) {
     const denied = adminDenied(request, env);
     if (denied) return denied;
     if (request.method === 'GET') return getAdminConfig(env);
@@ -680,13 +685,13 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
     return json({ detail: '方法不支持' }, 405, NO_STORE);
   }
 
-  if (pathname.startsWith('/admin/api/')) {
+  if (pathname.startsWith(`${ADMIN_BASE}/api/`)) {
     const denied = adminDenied(request, env);
     if (denied) return denied;
     return json({ detail: '未找到' }, 404, NO_STORE);
   }
 
-  if (pathname.startsWith('/admin/')) {
+  if (pathname.startsWith(`${ADMIN_BASE}/`)) {
     return json({ detail: '未找到' }, 404, NO_STORE);
   }
 

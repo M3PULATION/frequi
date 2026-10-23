@@ -1,12 +1,19 @@
 /**
- * Self-contained HTML for /admin. Deliberately build-free: it is not part of
- * the Vite bundle, so the investor-facing terminal never ships this code.
+ * Self-contained HTML for the private config page. Deliberately build-free: it
+ * is not part of the Vite bundle, so the investor-facing terminal never ships
+ * this code.
+ *
+ * `base` is the path the worker serves the page from; it is injected into the
+ * page script rather than hardcoded here, so moving the page only requires
+ * changing ADMIN_BASE in core.ts.
  *
  * Styling mirrors the main site (src/index.css): the same dark palette, the
  * mint `--primary` accent, the Schibsted Grotesk brand face for headings, and
  * the same 0.75rem radius. Kept as plain CSS so the page needs no build step.
  */
-export const ADMIN_PAGE = String.raw`<!doctype html>
+export function adminPageHtml(base: string): string {
+  const apiUrl = JSON.stringify(`${base}/api/config`);
+  return String.raw`<!doctype html>
 <html lang="zh-CN" class="dark">
 <head>
 <meta charset="utf-8">
@@ -268,6 +275,7 @@ export const ADMIN_PAGE = String.raw`<!doctype html>
 (function () {
   'use strict';
   var TOKEN_KEY = 'frequi-terminal-admin-token';
+  var API_URL = __ADMIN_API_URL__;
   var token = localStorage.getItem(TOKEN_KEY) || '';
   var authEl = document.getElementById('auth');
   var editorEl = document.getElementById('editor');
@@ -300,7 +308,7 @@ export const ADMIN_PAGE = String.raw`<!doctype html>
     var init = options || {};
     var headers = { Authorization: 'Bearer ' + token };
     if (init.body) headers['Content-Type'] = 'application/json';
-    return fetch('/admin/api/config', {
+    return fetch(API_URL, {
       method: init.method || 'GET',
       headers: headers,
       body: init.body
@@ -451,4 +459,5 @@ export const ADMIN_PAGE = String.raw`<!doctype html>
 })();
 </script>
 </body>
-</html>`;
+</html>`.replace('__ADMIN_API_URL__', () => apiUrl);
+}

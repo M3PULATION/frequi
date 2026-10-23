@@ -45,7 +45,7 @@ npx wrangler secret put BOTS_CONFIG
 
 配置优先从 KV namespace `BOTS_KV` 的 `bots` key 读取；KV 里没有值时回退到 Secret `BOTS_CONFIG`。因此旧部署升级后不会立刻失效。
 
-在浏览器打开 `/admin` 即可编辑机器人列表。密码不会下发到浏览器：页面显示为空，留空保存表示沿用原密码。保存后写入 KV，本 isolate 会立即刷新缓存；其他 isolate 最多 5 秒后可见。
+在浏览器打开 `/my-private-entry` 即可编辑机器人列表。密码不会下发到浏览器：页面显示为空，留空保存表示沿用原密码。保存后写入 KV，本 isolate 会立即刷新缓存；其他 isolate 最多 5 秒后可见。
 
 先设置管理令牌(令牌值由部署方自行决定，不要提交到仓库):
 
@@ -53,7 +53,7 @@ npx wrangler secret put BOTS_CONFIG
 npx wrangler secret put ADMIN_TOKEN
 ```
 
-`/admin` 页面本身可以公开访问(只包含表单，不含任何配置)，但 `/admin/api/*` 必须携带 `Authorization: Bearer <token>`。同一 isolate 内同一 IP 连续失败 10 次后会被限制 5 分钟。
+`/my-private-entry` 页面本身可以公开访问(只包含表单，不含任何配置)，但 `/my-private-entry/api/*` 必须携带 `Authorization: Bearer <token>`。同一 isolate 内同一 IP 连续失败 10 次后会被限制 5 分钟。
 
 ## 本地体验
 
@@ -84,6 +84,7 @@ pnpm deploy:worker
 - `/healthz`：`{"ok":true}`，`Cache-Control: no-store`。
 - `/local/bots`：实盘目录 JSON，和 Node 版数据形状一致。
 - `/api/*`：按 `x-ft-bot` 请求头转发到对应机器人。只允许 `GET`/`HEAD`，以及 `POST /api/v1/pair_candles`、`POST /api/v1/pair_history`；其他方法返回 `403 {"detail":"这个面板只读"}`。
+- `/my-private-entry`：私有的配置管理页；`/my-private-entry/api/config` 需要管理令牌。旧路径 `/admin` 不再提供管理页，会像其他未知路径一样交给静态资源/SPA。
 - 其余路径交给 Workers Assets，SPA 回退到 `index.html`。
 - POST 请求体上限 64 KiB，超限返回 `413 {"detail":"请求体过大"}`。
 - 未知或缺失 `x-ft-bot` 返回 `400 {"detail":"未知实盘"}`；上游不可达返回 502。
