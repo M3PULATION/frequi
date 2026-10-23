@@ -164,9 +164,13 @@ export function sanitizeBots(bots: BotConfig[]): AdminBot[] {
 }
 
 /**
- * Merge the editor payload with the current config. Passwords are matched by
- * array index because the browser never receives them. `null`, `undefined` and
- * an empty string all mean "keep the existing password".
+ * Merge the editor payload with the current config. The browser never receives
+ * passwords, so a blank field means "keep the existing password".
+ *
+ * Passwords are matched by identity (normalized origin + username), never by
+ * array index: reordering rows or repointing a row at another host must not
+ * hand one bot's password to a different bot. Repointing a row therefore
+ * requires the password to be typed again.
  */
 export function resolveAdminBots(input: unknown, previous: BotConfig[]): BotConfig[] {
   if (!Array.isArray(input)) throw new BadRequestError('bots 必须是数组');
@@ -187,25 +191,38 @@ export function resolveAdminBots(input: unknown, previous: BotConfig[]): BotConf
       throw new BadRequestError(`第 ${position} 台实盘缺少 username`);
     }
 
-    let password: string;
-    if (typeof bot.password === 'string' && bot.password.length > 0) {
-      password = bot.password;
-    } else if (bot.password == null || bot.password === '') {
-      const existing = previous[index];
-      if (!existing) throw new BadRequestError(`第 ${position} 台实盘缺少 password`);
-      password = existing.password;
-    } else {
+    if (bot.password != null && bot.password !== '' && typeof bot.password !== 'string') {
       throw new BadRequestError(`第 ${position} 台实盘的 password 格式无效`);
     }
 
-    const candidate = { name: bot.name, url: bot.url, username: bot.username, password };
+    const candidate = { name: bot.name, url: bot.url, username: bot.username, password: bot.password as string | null | undefined };
+
+    let normalized: BotConfig;
     try {
       // Reuse the runtime validation, including URL normalization.
-      return loadBotConfigs(JSON.stringify([candidate]))[0]!;
+      normalized = loadBotConfigs(
+        JSON.stringify([{ ...candidate, password: typeof bot.password === 'string' && bot.password ? bot.password : 'placeholder' }]),
+      )[0]!;
     } catch {
       // Never echo JSON.parse / URL errors: they may quote the raw entry.
       throw new BadRequestError(`第 ${position} 台实盘配置无效`);
     }
+
+    const typed = typeof bot.password === 'string' && bot.password.length > 0 ? bot.password : null;
+    if (typed != null) {
+      return { ...normalized, password: typed };
+    }
+
+    // Blank password: only inherit when this row still points at the same bot.
+    const source = previous.find(
+      (existing) => existing.origin === normalized.origin && existing.username === normalized.username,
+    );
+    if (!source) {
+      throw new BadRequestError(
+        `第 ${position} 台实盘需要重新填写 password（主机或用户名已变更）`,
+      );
+    }
+    return { ...normalized, password: source.password };
   });
 
   return merged;

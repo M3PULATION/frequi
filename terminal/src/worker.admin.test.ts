@@ -317,13 +317,20 @@ describe('admin helpers', () => {
     expect(bots[0]!.password).toBeNull();
   });
 
-  it('merges passwords by array index', () => {
+  it('keeps the password while the row still points at the same bot', () => {
     const previous = loadBotConfigs(secretConfig());
     const kept = resolveAdminBots(
       [{ name: '改名', url: 'http://127.0.0.1:9', username: 'freqtrader', password: null }],
       previous,
     );
     expect(kept[0]!.password).toBe(PASSWORD);
+
+    // A trailing slash / /dashboard suffix still normalizes to the same origin.
+    const normalized = resolveAdminBots(
+      [{ name: '改名', url: 'http://127.0.0.1:9/dashboard/', username: 'freqtrader', password: null }],
+      previous,
+    );
+    expect(normalized[0]!.password).toBe(PASSWORD);
 
     const replaced = resolveAdminBots(
       [{ name: '改名', url: 'http://127.0.0.1:9', username: 'freqtrader', password: 'next-password' }],
@@ -332,7 +339,55 @@ describe('admin helpers', () => {
     expect(replaced[0]!.password).toBe('next-password');
   });
 
-  it('requires a password when there is no previous entry at that index', () => {
+  it('refuses to reuse a password after the host changes', () => {
+    const previous = loadBotConfigs(secretConfig());
+    // This is the attack: repoint the row at another host and let the blank
+    // password inherit the previous bot's credential.
+    expect(() =>
+      resolveAdminBots(
+        [{ name: '别的机器', url: 'http://127.0.0.1:9999', username: 'freqtrader', password: null }],
+        previous,
+      ),
+    ).toThrow('第 1 台实盘需要重新填写 password');
+
+    // Typing the password explicitly is still allowed.
+    const allowed = resolveAdminBots(
+      [{ name: '别的机器', url: 'http://127.0.0.1:9999', username: 'freqtrader', password: 'fresh' }],
+      previous,
+    );
+    expect(allowed[0]!.password).toBe('fresh');
+    expect(allowed[0]!.origin).toBe('http://127.0.0.1:9999');
+  });
+
+  it('refuses to reuse a password after the username changes', () => {
+    const previous = loadBotConfigs(secretConfig());
+    expect(() =>
+      resolveAdminBots(
+        [{ name: '同名主机', url: 'http://127.0.0.1:9', username: 'someone-else', password: null }],
+        previous,
+      ),
+    ).toThrow('第 1 台实盘需要重新填写 password');
+  });
+
+  it('does not hand a password to a row that moved position', () => {
+    const previous = loadBotConfigs(
+      JSON.stringify([
+        { name: 'A', url: 'http://127.0.0.1:9', username: 'userA', password: 'passA' },
+        { name: 'B', url: 'http://127.0.0.1:10', username: 'userB', password: 'passB' },
+      ]),
+    );
+    const reordered = resolveAdminBots(
+      [
+        { name: 'B', url: 'http://127.0.0.1:10', username: 'userB', password: null },
+        { name: 'A', url: 'http://127.0.0.1:9', username: 'userA', password: null },
+      ],
+      previous,
+    );
+    expect(reordered[0]!.password).toBe('passB');
+    expect(reordered[1]!.password).toBe('passA');
+  });
+
+  it('requires a password for a brand new bot', () => {
     const previous = loadBotConfigs(secretConfig());
     expect(() =>
       resolveAdminBots(
@@ -342,6 +397,21 @@ describe('admin helpers', () => {
         ],
         previous,
       ),
-    ).toThrow('第 2 台实盘缺少 password');
+    ).toThrow('第 2 台实盘需要重新填写 password');
+  });
+
+  it('never echoes a password in a validation error', () => {
+    const previous = loadBotConfigs(secretConfig());
+    let message = '';
+    try {
+      resolveAdminBots(
+        [{ name: '坏配置', url: 'not a url at all', username: 'x', password: 'LeakMe999' }],
+        previous,
+      );
+    } catch (error) {
+      message = error instanceof Error ? error.message : String(error);
+    }
+    expect(message).toBeTruthy();
+    expect(message).not.toContain('LeakMe999');
   });
 });
