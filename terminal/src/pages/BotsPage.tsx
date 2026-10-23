@@ -16,6 +16,7 @@ import { ARCHIVE_STALE_MS, OVERVIEW_POLL_MS, formatNumber, formatPercentPoints, 
 import { overviewFromSnapshot, type BotOverview } from '@/lib/overview';
 import { cn } from '@/lib/utils';
 import { balancePoints, indexedReturn } from '@/lib/wallet';
+import { ADMIN_BASE } from '../../worker/core';
 
 const COLORS = ['#97fce4', '#3fd68b', '#ffd25f', '#ff5470', '#7eb6ff', '#50d2c1'];
 
@@ -167,7 +168,9 @@ export function BotsPage() {
       {catalog.isLoading ? <Skeleton className="h-96" /> : null}
       {catalog.error ? <p className="text-sm text-destructive">无法读取实盘列表</p> : null}
       {catalog.data && catalog.data.length === 0 ? (
-        <p className="text-sm text-muted-foreground">还没有配置实盘。请在 terminal/bots.local.json 里添加。</p>
+        <p className="text-sm text-muted-foreground">
+          还没有配置实盘。请前往 <a className="underline underline-offset-4" href={ADMIN_BASE}>管理页</a> 添加。
+        </p>
       ) : null}
       {overviews.length > 0 ? (
         <div className="grid gap-3 lg:grid-cols-2">

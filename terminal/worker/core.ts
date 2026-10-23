@@ -1,8 +1,8 @@
 /**
- * Cloudflare Workers entry for the read-only Freqtrade terminal.
+ * Cloudflare Workers logic for the read-only Freqtrade terminal.
  *
- * Mirrors the behaviour of server/botsProxy.ts using Web APIs only, so the
- * same frontend can be served either by the Node container or by Workers.
+ * Uses Web APIs only: it serves the admin page, proxies read-only Freqtrade
+ * requests, and keeps bot configuration in KV.
  */
 
 import { adminPageHtml } from './adminPage';

@@ -10,7 +10,7 @@ import {
   describeFallback,
   loadBotConfigs,
   normalizeBotUrl,
-} from '../server/botsProxy';
+} from '../worker/core';
 
 function token(expSeconds: number): string {
   const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString('base64url');
