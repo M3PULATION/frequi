@@ -5,7 +5,7 @@
 这条路线与 Docker/Node 路线**并存**：
 
 - Docker：`server/prod.ts` + `server/botsProxy.ts`，配置来自 `bots.local.json` / `BOTS_FILE`。
-- Workers：`worker/index.ts`，配置来自 Worker Secret `BOTS_CONFIG`，静态资源来自 Workers Assets(`dist/`)。
+- Workers：`worker/index.ts`，配置只来自 KV namespace `BOTS_KV`，静态资源来自 Workers Assets(`dist/`)。
 
 两套代码互不依赖，改其中一套不会影响另一套。
 
@@ -17,35 +17,15 @@ pnpm build              # 产物在 terminal/dist,Workers Assets 直接读取
 pnpm typecheck:worker   # 单独检查 Worker 代码(使用 @cloudflare/workers-types)
 ```
 
-`BOTS_CONFIG` 的内容与 `bots.example.json` 相同，是一个 JSON 数组：
+## 配置(KV)
 
-```json
-[
-  {
-    "name": "策略名称",
-    "url": "http://bot-host.example:8080",
-    "username": "freqtrader",
-    "password": "change-me"
-  }
-]
-```
+Worker 只从 KV namespace `BOTS_KV` 的 `bots` key 读取机器人配置，没有其他配置来源。值是 JSON 数组，每项必须有 `name`、`url`、`username`、`password`，字段与 `bots.example.json` 相同；`url` 末尾的 `/dashboard` 和斜杠会被自动归一化。
 
-每项必须有 `name`、`url`、`username`、`password`。`url` 末尾的 `/dashboard` 和斜杠会被自动归一化。
+配置通过下面的管理页维护，生产环境不要把真实凭据写进仓库或 `wrangler.jsonc`。
 
-## 配置 Secret
+## 网页管理配置
 
-```bash
-npx wrangler secret put BOTS_CONFIG
-# 粘贴上面的 JSON 数组后回车(整个数组作为一行/一段文本)
-```
-
-生产环境不要把真实凭据写进仓库或 `wrangler.jsonc`。
-
-## 网页管理配置(KV)
-
-配置优先从 KV namespace `BOTS_KV` 的 `bots` key 读取；KV 里没有值时回退到 Secret `BOTS_CONFIG`。因此旧部署升级后不会立刻失效。
-
-在浏览器打开 `/my-private-entry` 即可编辑机器人列表。密码不会下发到浏览器：页面显示为空，留空保存表示沿用原密码。保存后写入 KV，本 isolate 会立即刷新缓存；其他 isolate 最多 5 秒后可见。
+在浏览器打开 `/my-private-entry` 即可编辑机器人列表。密码不会下发到浏览器：页面显示为空，留空保存表示沿用原密码。保存后写入 KV 的 `bots` key，本 isolate 会立即刷新缓存；其他 isolate 最多 5 秒后可见。
 
 先设置管理令牌(令牌值由部署方自行决定，不要提交到仓库):
 
@@ -57,19 +37,25 @@ npx wrangler secret put ADMIN_TOKEN
 
 ## 本地体验
 
-本地开发可以用 `.dev.vars`(不要提交)提供配置：
+本地开发可以用 `.dev.vars`(不要提交)提供管理令牌：
 
 ```bash
 cat > .dev.vars <<'EOF'
-BOTS_CONFIG=[{"name":"演示","url":"http://127.0.0.1:9","username":"freqtrader","password":"change-me"}]
+ADMIN_TOKEN=local-admin-token
 EOF
 
 pnpm dev:worker          # 默认 http://localhost:8787
 curl localhost:8787/healthz
-curl localhost:8787/local/bots
 ```
 
-没有可达的机器人时，`/local/bots` 仍会返回合法目录，条目为 `online:false`。验证完记得删除 `.dev.vars`。
+机器人配置通过管理页写入本地 KV：打开 `http://localhost:8787/my-private-entry`，输入 `ADMIN_TOKEN` 后添加。也可以直接用 wrangler 写入：
+
+```bash
+npx wrangler kv key put --binding BOTS_KV --local bots \
+  '[{"name":"演示","url":"http://127.0.0.1:9","username":"freqtrader","password":"change-me"}]'
+```
+
+写入后 `curl localhost:8787/local/bots` 应能读到该机器人。没有可达的机器人时，`/local/bots` 仍会返回合法目录，条目为 `online:false`；KV 为空时返回明确提示而不是崩溃。验证完记得删除 `.dev.vars`。
 
 ## 部署
 
@@ -77,7 +63,7 @@ curl localhost:8787/local/bots
 pnpm deploy:worker
 ```
 
-首次部署前确认已经执行过 `pnpm build`，并且设置了 `BOTS_CONFIG` Secret。
+首次部署前确认已经执行过 `pnpm build`，并且设置了 `ADMIN_TOKEN` Secret、绑定了 `BOTS_KV` namespace。
 
 ## 路由与限制
 

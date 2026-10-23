@@ -22,7 +22,7 @@ export type BotKV = {
   put(key: string, value: string): Promise<void>;
 };
 
-export type BotSource = 'kv' | 'secret' | 'none';
+export type BotSource = 'kv' | 'none';
 
 /** Shape returned to the browser: credentials are never included. */
 export type AdminBot = {
@@ -47,8 +47,6 @@ type Session = {
 };
 
 export type WorkerEnv = {
-  /** JSON array in the same shape as bots.example.json. */
-  BOTS_CONFIG?: string;
   /** KV namespace holding the editable config under the `bots` key. */
   BOTS_KV?: BotKV;
   /** Bearer token for the admin API. */
@@ -141,7 +139,7 @@ export function botIdFromOrigin(origin: string): string {
 
 export function loadBotConfigs(raw: string): BotConfig[] {
   const parsed = JSON.parse(raw) as Array<{ name?: string; url?: string; username?: string; password?: string }>;
-  if (!Array.isArray(parsed)) throw new Error('BOTS_CONFIG 必须是数组');
+  if (!Array.isArray(parsed)) throw new Error('机器人配置必须是数组');
   return parsed.map((item) => {
     if (!item.name?.trim() || !item.url || !item.username || !item.password) {
       throw new Error('每台实盘都需要 name、url、username、password');
@@ -273,7 +271,7 @@ async function kvRaw(env: WorkerEnv, now: number): Promise<string | null> {
     const value = await kv.get(BOTS_KV_KEY);
     if (typeof value === 'string' && value.trim()) raw = value;
   } catch {
-    // A KV outage should not take the terminal down; fall back to the secret.
+    // A KV outage should not take the terminal down; treat it as no config.
     raw = null;
   }
   kvCache.set(kv, { at: now, raw });
@@ -283,8 +281,6 @@ async function kvRaw(env: WorkerEnv, now: number): Promise<string | null> {
 async function resolveConfig(env: WorkerEnv, now = Date.now()): Promise<{ raw: string | null; source: BotSource }> {
   const fromKv = await kvRaw(env, now);
   if (fromKv) return { raw: fromKv, source: 'kv' };
-  const secret = env.BOTS_CONFIG;
-  if (typeof secret === 'string' && secret.trim()) return { raw: secret, source: 'secret' };
   return { raw: null, source: 'none' };
 }
 
@@ -471,7 +467,7 @@ function createProxyState(raw: string): ProxyState {
   try {
     bots = loadBotConfigs(raw);
   } catch (error) {
-    throw new BadRequestError(error instanceof Error ? error.message : 'BOTS_CONFIG 无效');
+    throw new BadRequestError(error instanceof Error ? error.message : '机器人配置无效');
   }
 
   const byId = new Map(bots.map((bot) => [bot.id, bot]));
@@ -649,7 +645,7 @@ let currentState: ProxyState | null = null;
 
 async function stateFor(env: WorkerEnv): Promise<ProxyState> {
   const { raw } = await resolveConfig(env);
-  if (!raw) throw new BadRequestError('未配置 BOTS_CONFIG');
+  if (!raw) throw new BadRequestError('尚未配置机器人，请先在管理页添加');
   if (currentState?.raw === raw) return currentState;
   const next = createProxyState(raw);
   currentState = next;

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  BOTS_KV_KEY,
   MAX_BODY_BYTES,
   accessTokenUsable,
   basicAuth,
@@ -10,7 +11,27 @@ import {
   jwtExpiryMs,
   loadBotConfigs,
   normalizeBotUrl,
+  type BotKV,
+  type WorkerEnv,
 } from '../worker/core';
+
+/** Minimal in-memory stand-in for the BOTS_KV binding. */
+function memoryKv(initial?: string): BotKV {
+  const data = new Map<string, string>();
+  if (initial !== undefined) data.set(BOTS_KV_KEY, initial);
+  return {
+    async get(key) {
+      return data.get(key) ?? null;
+    },
+    async put(key, value) {
+      data.set(key, value);
+    },
+  };
+}
+
+function envWith(raw?: string): WorkerEnv {
+  return { BOTS_KV: memoryKv(raw) };
+}
 
 function token(expSeconds: number): string {
   const body = Buffer.from(JSON.stringify({ exp: expSeconds })).toString('base64url');
@@ -23,7 +44,7 @@ function configFor(url = 'http://127.0.0.1:9', tag = ''): { raw: string; id: str
 }
 
 function call(path: string, init?: RequestInit, botConfig = configFor()) {
-  return handleRequest(new Request(`http://terminal.test${path}`, init), { BOTS_CONFIG: botConfig.raw });
+  return handleRequest(new Request(`http://terminal.test${path}`, init), envWith(botConfig.raw));
 }
 
 afterEach(() => {
@@ -134,12 +155,13 @@ describe('worker routes', () => {
   });
 
   it('returns 400 for malformed config and malformed paths', async () => {
-    const badConfig = await handleRequest(new Request('http://terminal.test/local/bots'), { BOTS_CONFIG: '{}' });
+    const badConfig = await handleRequest(new Request('http://terminal.test/local/bots'), envWith('{}'));
     expect(badConfig.status).toBe(400);
 
-    const badPath = await handleRequest(new Request('http://terminal.test/%'), {
-      BOTS_CONFIG: configFor('http://127.0.0.1:9', 'path').raw,
-    });
+    const badPath = await handleRequest(
+      new Request('http://terminal.test/%'),
+      envWith(configFor('http://127.0.0.1:9', 'path').raw),
+    );
     expect(badPath.status).toBe(400);
   });
 });

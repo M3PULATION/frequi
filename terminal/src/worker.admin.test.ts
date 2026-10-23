@@ -36,14 +36,13 @@ function nextIp(): string {
   return `10.20.${Math.floor(ipCounter / 250)}.${ipCounter % 250}`;
 }
 
-function secretConfig(name = '来自 Secret', password = PASSWORD): string {
+function sampleConfig(name = '示例机器人', password = PASSWORD): string {
   return JSON.stringify([{ name, url: 'http://127.0.0.1:9', username: 'freqtrader', password }]);
 }
 
 function envFor(kv?: FakeKV, extra: Partial<WorkerEnv> = {}): WorkerEnv {
   return {
     ADMIN_TOKEN,
-    BOTS_CONFIG: secretConfig(),
     ...(kv ? { BOTS_KV: kv } : {}),
     ...extra,
   };
@@ -170,19 +169,21 @@ describe('admin page', () => {
 
 describe('admin config read', () => {
   it('never returns real passwords', async () => {
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor());
+    const kv = new FakeKV();
+    kv.data.set(BOTS_KV_KEY, sampleConfig());
+    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text).not.toContain(PASSWORD);
     const body = JSON.parse(text) as { bots: Array<Record<string, unknown>>; source: string };
-    expect(body.source).toBe('secret');
+    expect(body.source).toBe('kv');
     expect(body.bots).toHaveLength(1);
-    expect(body.bots[0]).toMatchObject({ name: '来自 Secret', url: 'http://127.0.0.1:9', password: null });
+    expect(body.bots[0]).toMatchObject({ name: '示例机器人', url: 'http://127.0.0.1:9', password: null });
   });
 
-  it('prefers KV over the secret', async () => {
+  it('reads KV for both admin reads and proxy requests', async () => {
     const kv = new FakeKV();
-    kv.data.set(BOTS_KV_KEY, secretConfig('来自 KV', 'kv-password'));
+    kv.data.set(BOTS_KV_KEY, sampleConfig('来自 KV', 'kv-password'));
     const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
     const body = (await response.json()) as { bots: Array<{ name: string }>; source: string };
     expect(body.source).toBe('kv');
@@ -197,28 +198,22 @@ describe('admin config read', () => {
     expect(((await listed.json()) as Array<{ name: string }>)[0]!.name).toBe('来自 KV');
   });
 
-  it('falls back to the secret when KV has no value', async () => {
-    const kv = new FakeKV();
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
-    const body = (await response.json()) as { bots: Array<{ name: string }>; source: string };
-    expect(body.source).toBe('secret');
-    expect(body.bots[0]!.name).toBe('来自 Secret');
-  });
+  it('reports source none when KV has no value', async () => {
+    const empty = await adminCall(`${ADMIN_BASE}/api/config`, envFor(new FakeKV()));
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ bots: [], source: 'none' });
 
-  it('reports source none when neither store is configured', async () => {
-    const response = await adminCall(
-      `${ADMIN_BASE}/api/config`,
-      envFor(undefined, { BOTS_CONFIG: undefined }),
-      { token: ADMIN_TOKEN },
-    );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ bots: [], source: 'none' });
+    // A missing binding behaves the same way.
+    const unbound = await adminCall(`${ADMIN_BASE}/api/config`, envFor());
+    expect(unbound.status).toBe(200);
+    expect(await unbound.json()).toEqual({ bots: [], source: 'none' });
   });
 });
 
 describe('admin config write', () => {
   it('keeps the previous password when password is null or omitted', async () => {
     const kv = new FakeKV();
+    kv.data.set(BOTS_KV_KEY, sampleConfig());
     const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
       method: 'PUT',
       body: {
@@ -272,7 +267,7 @@ describe('admin config write', () => {
     const kv = new FakeKV();
     const env = envFor(kv);
     const first = (await (await adminCall(`${ADMIN_BASE}/api/config`, env)).json()) as { source: string };
-    expect(first.source).toBe('secret');
+    expect(first.source).toBe('none');
 
     await adminCall(`${ADMIN_BASE}/api/config`, env, {
       method: 'PUT',
@@ -289,7 +284,7 @@ describe('admin config write', () => {
 
   it('reads KV at most once per cache window for proxy requests', async () => {
     const kv = new FakeKV();
-    kv.data.set(BOTS_KV_KEY, secretConfig('缓存中的机器人'));
+    kv.data.set(BOTS_KV_KEY, sampleConfig('缓存中的机器人'));
     const env = envFor(kv);
     vi.stubGlobal('fetch', vi.fn(async () => {
       throw new Error('offline');
@@ -347,13 +342,13 @@ describe('admin helpers', () => {
   });
 
   it('never includes passwords when sanitizing', () => {
-    const bots = sanitizeBots(loadBotConfigs(secretConfig()));
+    const bots = sanitizeBots(loadBotConfigs(sampleConfig()));
     expect(JSON.stringify(bots)).not.toContain(PASSWORD);
     expect(bots[0]!.password).toBeNull();
   });
 
   it('keeps the password while the row still points at the same bot', () => {
-    const previous = loadBotConfigs(secretConfig());
+    const previous = loadBotConfigs(sampleConfig());
     const kept = resolveAdminBots(
       [{ name: '改名', url: 'http://127.0.0.1:9', username: 'freqtrader', password: null }],
       previous,
@@ -375,7 +370,7 @@ describe('admin helpers', () => {
   });
 
   it('refuses to reuse a password after the host changes', () => {
-    const previous = loadBotConfigs(secretConfig());
+    const previous = loadBotConfigs(sampleConfig());
     // This is the attack: repoint the row at another host and let the blank
     // password inherit the previous bot's credential.
     expect(() =>
@@ -395,7 +390,7 @@ describe('admin helpers', () => {
   });
 
   it('refuses to reuse a password after the username changes', () => {
-    const previous = loadBotConfigs(secretConfig());
+    const previous = loadBotConfigs(sampleConfig());
     expect(() =>
       resolveAdminBots(
         [{ name: '同名主机', url: 'http://127.0.0.1:9', username: 'someone-else', password: null }],
@@ -423,7 +418,7 @@ describe('admin helpers', () => {
   });
 
   it('requires a password for a brand new bot', () => {
-    const previous = loadBotConfigs(secretConfig());
+    const previous = loadBotConfigs(sampleConfig());
     expect(() =>
       resolveAdminBots(
         [
@@ -436,7 +431,7 @@ describe('admin helpers', () => {
   });
 
   it('never echoes a password in a validation error', () => {
-    const previous = loadBotConfigs(secretConfig());
+    const previous = loadBotConfigs(sampleConfig());
     let message = '';
     try {
       resolveAdminBots(

@@ -374,10 +374,8 @@ export function adminPageHtml(base: string): string {
     if (!rowsEl.children.length) addRow(null, true);
     if (source === 'kv') {
       sourceEl.textContent = '当前配置来自 KV，保存后立即生效。';
-    } else if (source === 'secret') {
-      sourceEl.textContent = '当前配置来自 Secret(BOTS_CONFIG)。保存后会写入 KV 并优先使用。';
     } else {
-      sourceEl.textContent = '当前还没有配置任何实盘。';
+      sourceEl.textContent = '当前还没有配置任何实盘，请在下方添加。';
     }
   }
 
