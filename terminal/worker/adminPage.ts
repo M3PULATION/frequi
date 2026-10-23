@@ -5,7 +5,8 @@
  *
  * `base` is the path the worker serves the page from; it is injected into the
  * page script rather than hardcoded here, so moving the page only requires
- * changing ADMIN_BASE in core.ts.
+ * changing the deployer's ADMIN_PATH var (and the matching static assets
+ * routing in wrangler.jsonc).
  *
  * Styling mirrors the main site (src/index.css): the same dark palette, the
  * mint `--primary` accent, the Schibsted Grotesk brand face for headings, and

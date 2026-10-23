@@ -11,7 +11,7 @@
 - **只读白名单**:只放行 `GET` / `HEAD`,以及查询 K 线所需的 `POST /api/v1/pair_candles`、`POST /api/v1/pair_history`;其余请求返回 `403 {"detail":"这个面板只读"}`。
 - **凭据不出浏览器**:Freqtrade 的地址、用户名、密码由 Worker 持有;管理接口返回的密码字段永远为 `null`。
 - **KV 配置**:机器人列表存在 KV 的 `bots` key,保存后由 Worker 读取,无需重新部署。
-- **网页管理**:私有路径上的配置页支持增删机器人、留空沿用原密码,保存即写入 KV。
+- **网页管理**:配置页支持增删机器人、留空沿用原密码,保存即写入 KV;入口路径由部署者通过 `ADMIN_PATH` 自定义(默认 `/admin`)。
 - **多机器人**:同一面板可展示多台实盘,顶部切换,首页汇总在线状态、策略与权益。
 - **策略与行情页面**:实盘概览、持仓、历史成交、K 线、盈亏、余额、交易对、日志、系统信息。
 - **无 Node 运行时**:Worker 只使用标准 Web API,生产环境不需要容器或常驻进程。
@@ -29,7 +29,7 @@
 | `/pairs` | 交易对列表与表现 |
 | `/logs` | Freqtrade 运行日志 |
 | `/system` | 系统 / 运行信息 |
-| `/my-private-entry` | 私有配置管理页(不对外链接) |
+| `ADMIN_PATH` | 配置管理页(默认 `/admin`,由 `vars.ADMIN_PATH` 配置,不对外链接) |
 
 ## 架构
 
@@ -39,7 +39,7 @@
      │                    └──────────────────────────┘
      │ /api/*  (X-Ft-Bot)
      │ /local/bots
-     │ /my-private-entry
+     │ ADMIN_PATH
      ▼
   ┌───────────────────────────────────────────────┐
   │ Cloudflare Worker (terminal/worker/core.ts)   │
@@ -57,7 +57,7 @@
 - `terminal/worker/adminPage.ts`:自包含的管理页 HTML,不进入前端构建产物。
 - `terminal/src/`:React 前端,构建后写入 `terminal/dist`。
 - `terminal/wrangler.jsonc`:Worker、Assets 与 KV 绑定。
-- 路由分发:`/api/*`、`/local/*`、`/healthz`、`/my-private-entry*` 先交给 Worker;其余路径交给 Assets,SPA 回退到 `index.html`。
+- 路由分发:`/api/*`、`/local/*`、`/healthz` 以及 `ADMIN_PATH`(默认 `/admin`)下的路径先交给 Worker;其余路径交给 Assets,SPA 回退到 `index.html`。注意 `run_worker_first` 是静态列表,必须与 `ADMIN_PATH` 手动保持一致。
 
 ## 部署前置条件
 
@@ -82,9 +82,18 @@ pnpm exec wrangler login
    pnpm exec wrangler kv namespace create BOTS_KV
    ```
 
-   命令会输出 namespace 的 `id`。把它填入 `wrangler.jsonc` 的 `kv_namespaces[0].id`;仓库里的值只是示例,请换成你自己的。
+   命令会输出 namespace 的 `id`。把它填入 `wrangler.jsonc` 的 `kv_namespaces[0].id`;仓库里是占位符 `<your-kv-namespace-id>`,部署前必须换成你自己的,否则 `wrangler deploy` 会因绑定无效而失败。`wrangler dev` 使用本地 KV,占位符不影响启动。
 
-2. **构建前端**
+2. **配置管理页路径(可选)**
+
+   `wrangler.jsonc` 的 `vars.ADMIN_PATH` 默认是 `/admin`,开箱即用。建议改成只有你知道的入口,例如 `/my-private-entry`。修改时 `wrangler.jsonc` 里**必须同步改两处**,否则请求到不了 Worker:
+
+   - `vars.ADMIN_PATH`
+   - `assets.run_worker_first` 中的两项(裸路径与 `/*` 变体),例如 `["/my-private-entry", "/my-private-entry/*"]`
+
+   `run_worker_first` 是静态配置,无法读取 `vars`,这是已知的成对修改点。使用 Vite 本地开发时,`terminal/vite.config.ts` 的代理也读取 `ADMIN_PATH` 环境变量,请用同一个值启动(见[本地开发](#本地开发))。
+
+3. **构建前端**
 
    ```bash
    pnpm build
@@ -92,7 +101,7 @@ pnpm exec wrangler login
 
    构建结果在 `terminal/dist`,Workers Assets 直接读取该目录。
 
-3. **设置管理令牌**
+4. **设置管理令牌**
 
    ```bash
    pnpm exec wrangler secret put ADMIN_TOKEN
@@ -100,22 +109,28 @@ pnpm exec wrangler login
 
    令牌就是管理页的登录凭据。请使用足够长的随机值,例如 `openssl rand -base64 32`。不要把它写进仓库、`wrangler.jsonc` 或聊天记录。
 
-4. **部署**
+5. **部署**
 
    ```bash
    pnpm deploy:worker
    # 等价于 pnpm exec wrangler deploy
    ```
 
-5. **添加机器人**
+6. **添加机器人**
 
-   打开 `https://<worker-name>.<your-subdomain>.workers.dev/my-private-entry`,输入 `ADMIN_TOKEN`,然后填写每台实盘的名称、地址、用户名和密码并保存。
+   打开 `https://<worker-name>.<your-subdomain>.workers.dev<ADMIN_PATH>`,例如默认的 `https://<worker-name>.<your-subdomain>.workers.dev/admin`,或你自定义的 `/my-private-entry`。输入 `ADMIN_TOKEN`,然后填写每台实盘的名称、地址、用户名和密码并保存。
 
    可选:在 Cloudflare 控制台为 Worker 绑定自有域名,再按同样方式访问管理页。
 
 ## 本地开发
 
-本地开发需要两个终端:一个跑 Workers,一个跑 Vite。Vite 会把 `/api`、`/local`、`/healthz` 和 `/my-private-entry` 代理到 `127.0.0.1:8787`。
+本地开发需要两个终端:一个跑 Workers,一个跑 Vite。Vite 会把 `/api`、`/local`、`/healthz` 和 `ADMIN_PATH`(默认 `/admin`)代理到 `127.0.0.1:8787`。若要使用自定义路径,请让 Workers 和 Vite 使用同一个值,并同步 `run_worker_first`:
+
+```bash
+# wrangler.jsonc: vars.ADMIN_PATH 与 run_worker_first 都要改成 /my-private-entry
+ADMIN_PATH=/my-private-entry pnpm dev                # Vite
+pnpm exec wrangler dev --var ADMIN_PATH:/my-private-entry  # Workers
+```
 
 ```bash
 cd terminal
@@ -139,7 +154,7 @@ pnpm dev                                              # http://127.0.0.1:3001
 ```
 
 - 前端页面:http://127.0.0.1:3001/
-- 管理页:http://127.0.0.1:3001/my-private-entry (经 Vite 代理)
+- 管理页:http://127.0.0.1:3001/admin (默认路径,经 Vite 代理;自定义时替换为你的 `ADMIN_PATH`)
 - 本地 KV 状态保存在 `terminal/.wrangler/`,`.dev.vars` 和 `.wrangler/` 都不会进入 git。
 
 也可以不带前端、直接验证 Worker:
@@ -187,7 +202,7 @@ curl http://127.0.0.1:8787/local/bots
 请先读这一节,再决定是否把链接发给别人。
 
 - **只读面板本身没有登录**:任何拿到终端 URL 的人都能查看持仓、盈亏与日志。这是面向投资人展示的设计。如果需要限制访问,请在 Cloudflare 侧使用 Access 或 WAF,不要只依赖"路径没人知道"。
-- **管理页不是靠隐藏路径保护的**:`/my-private-entry` 只是不对外链接,页面本身公开且不含配置。真正的边界是 `ADMIN_TOKEN`;所有 `/my-private-entry/api/*` 请求都必须带 `Authorization: Bearer <token>`。
+- **管理页路径不是安全边界**:`ADMIN_PATH`(默认 `/admin`,部署者可自定义)只决定入口地址,不提供访问控制;页面本身公开且不含配置。真正的边界是 `ADMIN_TOKEN`;所有 `${ADMIN_PATH}/api/*` 请求都必须带 `Authorization: Bearer <token>`。不要因为路径不公开就降低令牌强度。
 - **令牌强度决定安全性**:请使用至少 32 字节的随机值。连续失败 10 次后,同一 isolate 内同一 IP 会被限制 5 分钟;限流状态保存在内存中,不是跨节点的强保证。
 - **机器人凭据保存在 KV**,由 Worker 在转发时使用;管理接口的响应、错误信息和页面 HTML 都不会包含密码。
 - **写入被白名单拦截**:除 `GET`/`HEAD` 与两个 K 线查询 POST 外,所有方法返回 403;POST 请求体上限 64 KiB。
@@ -219,6 +234,14 @@ Worker 从 Cloudflare 网络发起请求,不能访问你电脑上的 `127.0.0.1`
 **`wrangler dev` 启动后页面 404 或没有样式**
 
 先执行 `pnpm build` 生成 `terminal/dist`。
+
+**改了 `ADMIN_PATH` 后管理页 404,或返回了前端 SPA**
+
+请求在到达 Worker 前被 Assets 接走了。请把 `wrangler.jsonc` 中 `assets.run_worker_first` 的两项(裸路径与 `/*`)改成同一个新路径,然后重新部署。这个列表是静态的,不会读取 `vars.ADMIN_PATH`。
+
+**`wrangler deploy` 报 KV namespace 不存在**
+
+仓库里的 `kv_namespaces[0].id` 是占位符 `<your-kv-namespace-id>`。先执行 `pnpm exec wrangler kv namespace create BOTS_KV`,把输出的真实 id 填进去。`wrangler dev` 使用本地 KV,占位符也能启动;`deploy` 必须使用真实 id。
 
 **`/local/bots` 返回 `[]` 或全部离线**
 

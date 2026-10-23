@@ -51,15 +51,36 @@ export type WorkerEnv = {
   BOTS_KV?: BotKV;
   /** Bearer token for the admin API. */
   ADMIN_TOKEN?: string;
+  /**
+   * Path that serves the config page and prefixes its API. Configured by the
+   * deployer through the `ADMIN_PATH` var; falls back to DEFAULT_ADMIN_PATH.
+   */
+  ADMIN_PATH?: string;
   ASSETS?: { fetch(request: Request): Promise<Response> };
 };
 
 const READONLY_POST = new Set(['/api/v1/pair_candles', '/api/v1/pair_history']);
+
 /**
- * Private path that serves the config page and prefixes its API. It is not
- * advertised anywhere: the page must not be linked from the public terminal.
+ * Default path for the config page and its API. Deployers override it with the
+ * `ADMIN_PATH` var in wrangler.jsonc. This constant is only the fallback (and
+ * the value the tests use); it is not a security boundary.
  */
-export const ADMIN_BASE = '/my-private-entry';
+export const DEFAULT_ADMIN_PATH = '/admin';
+
+/**
+ * Normalize a configured admin path: trim whitespace, add a missing leading
+ * slash, and drop trailing slashes. An empty value falls back to the default.
+ * Exported so the rule can be unit tested directly.
+ */
+export function normalizeAdminPath(input?: string | null): string {
+  const value = (input ?? '').trim();
+  if (!value) return DEFAULT_ADMIN_PATH;
+  const withLeadingSlash = value.startsWith('/') ? value : `/${value}`;
+  const trimmed = withLeadingSlash.replace(/\/+$/, '');
+  return trimmed || DEFAULT_ADMIN_PATH;
+}
+
 /** Refresh the access token this long before it expires, so a probe does not trip on 401. */
 export const ACCESS_TOKEN_SKEW_MS = 60_000;
 /** Successful catalog stays warm. A miss is retried sooner so a bot can come back. */
@@ -401,8 +422,8 @@ async function putAdminConfig(request: Request, env: WorkerEnv): Promise<Respons
   return json({ ok: true }, 200, NO_STORE);
 }
 
-function adminPage(): Response {
-  return new Response(adminPageHtml(ADMIN_BASE), {
+function adminPage(base: string): Response {
+  return new Response(adminPageHtml(base), {
     status: 200,
     headers: {
       'Content-Type': 'text/html; charset=utf-8',
@@ -665,15 +686,16 @@ function decodedPathname(url: URL): string {
 async function route(request: Request, env: WorkerEnv): Promise<Response> {
   const url = new URL(request.url);
   const pathname = decodedPathname(url);
+  const adminBase = normalizeAdminPath(env.ADMIN_PATH);
 
   if (pathname === '/healthz') {
     return json({ ok: true }, 200, { 'Cache-Control': 'no-store' });
   }
 
   // The page itself is public and contains no config; every API call is guarded.
-  if (pathname === ADMIN_BASE || pathname === `${ADMIN_BASE}/`) return adminPage();
+  if (pathname === adminBase || pathname === `${adminBase}/`) return adminPage(adminBase);
 
-  if (pathname === `${ADMIN_BASE}/api/config`) {
+  if (pathname === `${adminBase}/api/config`) {
     const denied = adminDenied(request, env);
     if (denied) return denied;
     if (request.method === 'GET') return getAdminConfig(env);
@@ -681,13 +703,13 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
     return json({ detail: '方法不支持' }, 405, NO_STORE);
   }
 
-  if (pathname.startsWith(`${ADMIN_BASE}/api/`)) {
+  if (pathname.startsWith(`${adminBase}/api/`)) {
     const denied = adminDenied(request, env);
     if (denied) return denied;
     return json({ detail: '未找到' }, 404, NO_STORE);
   }
 
-  if (pathname.startsWith(`${ADMIN_BASE}/`)) {
+  if (pathname.startsWith(`${adminBase}/`)) {
     return json({ detail: '未找到' }, 404, NO_STORE);
   }
 

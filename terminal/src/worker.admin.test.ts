@@ -1,12 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  ADMIN_BASE,
+  DEFAULT_ADMIN_PATH,
   ADMIN_MAX_FAILURES,
   BOTS_KV_KEY,
   constantTimeEqual,
   handleRequest,
   loadBotConfigs,
+  normalizeAdminPath,
   resolveAdminBots,
   sanitizeBots,
   type BotKV,
@@ -69,17 +70,17 @@ afterEach(() => {
 
 describe('admin authentication', () => {
   it('rejects a missing or wrong token with 401', async () => {
-    const missing = await adminCall(`${ADMIN_BASE}/api/config`, envFor(), { token: null });
+    const missing = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(), { token: null });
     expect(missing.status).toBe(401);
     expect(await missing.json()).toEqual({ detail: '令牌无效' });
 
-    const wrong = await adminCall(`${ADMIN_BASE}/api/config`, envFor(), { token: 'wrong' });
+    const wrong = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(), { token: 'wrong' });
     expect(wrong.status).toBe(401);
     expect(await wrong.json()).toEqual({ detail: '令牌无效' });
   });
 
   it('returns 503 when ADMIN_TOKEN is not configured', async () => {
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(undefined, { ADMIN_TOKEN: undefined }));
+    const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(undefined, { ADMIN_TOKEN: undefined }));
     expect(response.status).toBe(503);
     const body = (await response.json()) as { detail: string; hint: string };
     expect(body.detail).toBe('未配置管理令牌');
@@ -90,30 +91,30 @@ describe('admin authentication', () => {
     const env = envFor();
     const ip = nextIp();
     for (let i = 0; i < ADMIN_MAX_FAILURES; i += 1) {
-      const response = await adminCall(`${ADMIN_BASE}/api/config`, env, { token: 'wrong', ip });
+      const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: 'wrong', ip });
       expect(response.status).toBe(401);
     }
-    const blocked = await adminCall(`${ADMIN_BASE}/api/config`, env, { token: 'wrong', ip });
+    const blocked = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: 'wrong', ip });
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toEqual({ detail: '尝试次数过多，请稍后再试' });
 
     // A correct token cannot bypass an active block.
-    const stillBlocked = await adminCall(`${ADMIN_BASE}/api/config`, env, { token: ADMIN_TOKEN, ip });
+    const stillBlocked = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: ADMIN_TOKEN, ip });
     expect(stillBlocked.status).toBe(429);
   });
 
   it('clears the failure counter after a successful login', async () => {
     const env = envFor();
     const ip = nextIp();
-    expect((await adminCall(`${ADMIN_BASE}/api/config`, env, { token: 'wrong', ip })).status).toBe(401);
-    expect((await adminCall(`${ADMIN_BASE}/api/config`, env, { token: ADMIN_TOKEN, ip })).status).toBe(200);
-    expect((await adminCall(`${ADMIN_BASE}/api/config`, env, { token: 'wrong', ip })).status).toBe(401);
+    expect((await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: 'wrong', ip })).status).toBe(401);
+    expect((await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: ADMIN_TOKEN, ip })).status).toBe(200);
+    expect((await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, { token: 'wrong', ip })).status).toBe(401);
   });
 });
 
 describe('admin page', () => {
   it('serves the page without a token and with no-store headers', async () => {
-    const response = await handleRequest(new Request(`http://terminal.test${ADMIN_BASE}`), envFor());
+    const response = await handleRequest(new Request(`http://terminal.test${DEFAULT_ADMIN_PATH}`), envFor());
     expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('text/html');
     expect(response.headers.get('cache-control')).toBe('no-store');
@@ -121,26 +122,56 @@ describe('admin page', () => {
     const html = await response.text();
     expect(html).toContain('实盘配置管理');
     // The page script must call the private path, not a hardcoded one.
-    expect(html).toContain(`${ADMIN_BASE}/api/config`);
+    expect(html).toContain(`${DEFAULT_ADMIN_PATH}/api/config`);
     expect(html).not.toContain(PASSWORD);
     expect(html).not.toContain(ADMIN_TOKEN);
   });
 
   it('serves the same page with a trailing slash', async () => {
-    const response = await handleRequest(new Request(`http://terminal.test${ADMIN_BASE}/`), envFor());
+    const response = await handleRequest(new Request(`http://terminal.test${DEFAULT_ADMIN_PATH}/`), envFor());
     expect(response.status).toBe(200);
     expect(await response.text()).toContain('实盘配置管理');
   });
 
-  it('does not serve the config page from the old /admin path', async () => {
-    const response = await handleRequest(new Request('http://terminal.test/admin'), envFor());
-    expect(response.status).toBe(404);
+  it('requires auth for unknown admin API paths', async () => {
+    const denied = await adminCall(`${DEFAULT_ADMIN_PATH}/api/unknown`, envFor(), { token: null });
+    expect(denied.status).toBe(401);
+
+    const allowed = await adminCall(`${DEFAULT_ADMIN_PATH}/api/unknown`, envFor());
+    expect(allowed.status).toBe(404);
+  });
+});
+
+describe('admin path configuration', () => {
+  it('serves the default path when ADMIN_PATH is not configured', async () => {
+    const response = await handleRequest(new Request(`http://terminal.test${DEFAULT_ADMIN_PATH}`), envFor());
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('text/html');
     const html = await response.text();
-    expect(html).not.toContain('实盘配置管理');
-    expect(html).not.toContain('实盘配置管理 · MANIPULATION');
+    expect(html).toContain('实盘配置管理');
+    expect(html).toContain(`${DEFAULT_ADMIN_PATH}/api/config`);
   });
 
-  it('falls back to the SPA for /admin instead of serving the page', async () => {
+  it('serves a custom path and stops serving the default one', async () => {
+    const env = envFor(undefined, { ADMIN_PATH: '/secret-entry' });
+    const page = await handleRequest(new Request('http://terminal.test/secret-entry'), env);
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain('实盘配置管理');
+    // The page script must use the configured path, not the default one.
+    expect(html).toContain('/secret-entry/api/config');
+    expect(html).not.toContain(`${DEFAULT_ADMIN_PATH}/api/config`);
+
+    const api = await adminCall('/secret-entry/api/config', env);
+    expect(api.status).toBe(200);
+    expect(await api.json()).toEqual({ bots: [], source: 'none' });
+
+    const defaultPath = await handleRequest(new Request(`http://terminal.test${DEFAULT_ADMIN_PATH}`), env);
+    expect(defaultPath.status).toBe(404);
+    expect(await defaultPath.text()).not.toContain('实盘配置管理');
+  });
+
+  it('falls back to the SPA for the default path when a custom path is configured', async () => {
     const assets = {
       fetch: vi.fn(async () => new Response('<!doctype html><html><body>spa</body></html>', {
         status: 200,
@@ -148,8 +179,8 @@ describe('admin page', () => {
       })),
     };
     const response = await handleRequest(
-      new Request('http://terminal.test/admin', { headers: { accept: 'text/html' } }),
-      envFor(undefined, { ASSETS: assets }),
+      new Request(`http://terminal.test${DEFAULT_ADMIN_PATH}`, { headers: { accept: 'text/html' } }),
+      envFor(undefined, { ADMIN_PATH: '/secret-entry', ASSETS: assets }),
     );
     expect(assets.fetch).toHaveBeenCalledTimes(1);
     expect(response.status).toBe(200);
@@ -158,12 +189,18 @@ describe('admin page', () => {
     expect(html).not.toContain('实盘配置管理');
   });
 
-  it('requires auth for unknown admin API paths', async () => {
-    const denied = await adminCall(`${ADMIN_BASE}/api/unknown`, envFor(), { token: null });
-    expect(denied.status).toBe(401);
+  it('normalizes a missing leading slash and extra trailing slashes', async () => {
+    expect(normalizeAdminPath('secret-entry')).toBe('/secret-entry');
+    expect(normalizeAdminPath('/secret-entry/')).toBe('/secret-entry');
+    expect(normalizeAdminPath('  /secret-entry//  ')).toBe('/secret-entry');
+    expect(normalizeAdminPath('')).toBe(DEFAULT_ADMIN_PATH);
+    expect(normalizeAdminPath(undefined)).toBe(DEFAULT_ADMIN_PATH);
+    expect(normalizeAdminPath('/')).toBe(DEFAULT_ADMIN_PATH);
 
-    const allowed = await adminCall(`${ADMIN_BASE}/api/unknown`, envFor());
-    expect(allowed.status).toBe(404);
+    const env = envFor(undefined, { ADMIN_PATH: 'secret-entry/' });
+    const page = await handleRequest(new Request('http://terminal.test/secret-entry'), env);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toContain('/secret-entry/api/config');
   });
 });
 
@@ -171,7 +208,7 @@ describe('admin config read', () => {
   it('never returns real passwords', async () => {
     const kv = new FakeKV();
     kv.data.set(BOTS_KV_KEY, sampleConfig());
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
+    const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv));
     expect(response.status).toBe(200);
     const text = await response.text();
     expect(text).not.toContain(PASSWORD);
@@ -184,7 +221,7 @@ describe('admin config read', () => {
   it('reads KV for both admin reads and proxy requests', async () => {
     const kv = new FakeKV();
     kv.data.set(BOTS_KV_KEY, sampleConfig('来自 KV', 'kv-password'));
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
+    const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv));
     const body = (await response.json()) as { bots: Array<{ name: string }>; source: string };
     expect(body.source).toBe('kv');
     expect(body.bots[0]!.name).toBe('来自 KV');
@@ -199,12 +236,12 @@ describe('admin config read', () => {
   });
 
   it('reports source none when KV has no value', async () => {
-    const empty = await adminCall(`${ADMIN_BASE}/api/config`, envFor(new FakeKV()));
+    const empty = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(new FakeKV()));
     expect(empty.status).toBe(200);
     expect(await empty.json()).toEqual({ bots: [], source: 'none' });
 
     // A missing binding behaves the same way.
-    const unbound = await adminCall(`${ADMIN_BASE}/api/config`, envFor());
+    const unbound = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor());
     expect(unbound.status).toBe(200);
     expect(await unbound.json()).toEqual({ bots: [], source: 'none' });
   });
@@ -214,7 +251,7 @@ describe('admin config write', () => {
   it('keeps the previous password when password is null or omitted', async () => {
     const kv = new FakeKV();
     kv.data.set(BOTS_KV_KEY, sampleConfig());
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: {
         bots: [
@@ -225,7 +262,7 @@ describe('admin config write', () => {
     });
     expect(response.status).toBe(400); // second row has no previous config to inherit from
 
-    const single = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const single = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: { bots: [{ name: '保留密码', url: 'http://127.0.0.1:9/dashboard', username: 'freqtrader', password: null }] },
     });
@@ -244,7 +281,7 @@ describe('admin config write', () => {
   it('uses a new password when one is supplied and hides it afterwards', async () => {
     const kv = new FakeKV();
     const nextPassword = 'brand-new-password';
-    const saved = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const saved = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: { bots: [{ name: '新密码', url: 'http://127.0.0.1:9', username: 'freqtrader', password: nextPassword }] },
     });
@@ -253,7 +290,7 @@ describe('admin config write', () => {
     const stored = JSON.parse(kv.data.get(BOTS_KV_KEY)!) as Array<Record<string, string>>;
     expect(stored[0]!.password).toBe(nextPassword);
 
-    const read = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv));
+    const read = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv));
     const text = await read.text();
     expect(text).not.toContain(nextPassword);
     expect((JSON.parse(text) as { source: string }).source).toBe('kv');
@@ -266,15 +303,15 @@ describe('admin config write', () => {
   it('invalidates the KV cache so a save is visible immediately', async () => {
     const kv = new FakeKV();
     const env = envFor(kv);
-    const first = (await (await adminCall(`${ADMIN_BASE}/api/config`, env)).json()) as { source: string };
+    const first = (await (await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env)).json()) as { source: string };
     expect(first.source).toBe('none');
 
-    await adminCall(`${ADMIN_BASE}/api/config`, env, {
+    await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env, {
       method: 'PUT',
       body: { bots: [{ name: '刚保存', url: 'http://127.0.0.1:9', username: 'freqtrader', password: PASSWORD }] },
     });
 
-    const after = (await (await adminCall(`${ADMIN_BASE}/api/config`, env)).json()) as {
+    const after = (await (await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, env)).json()) as {
       source: string;
       bots: Array<{ name: string }>;
     };
@@ -297,7 +334,7 @@ describe('admin config write', () => {
 
   it('rejects invalid config with 400 and never echoes the password', async () => {
     const kv = new FakeKV();
-    const bad = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const bad = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: { bots: [{ name: '', url: 'http://127.0.0.1:9', username: 'freqtrader', password: PASSWORD }] },
     });
@@ -307,14 +344,14 @@ describe('admin config write', () => {
     expect(JSON.parse(badText).detail).toContain('缺少 name');
     expect(kv.data.has(BOTS_KV_KEY)).toBe(false);
 
-    const badUrl = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const badUrl = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: { bots: [{ name: '坏地址', url: 'http://bad host', username: 'freqtrader', password: PASSWORD }] },
     });
     expect(badUrl.status).toBe(400);
     expect(await badUrl.text()).not.toContain(PASSWORD);
 
-    const notArray = await adminCall(`${ADMIN_BASE}/api/config`, envFor(kv), {
+    const notArray = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(kv), {
       method: 'PUT',
       body: { bots: { password: PASSWORD } },
     });
@@ -323,7 +360,7 @@ describe('admin config write', () => {
   });
 
   it('returns 503 when the KV binding is missing', async () => {
-    const response = await adminCall(`${ADMIN_BASE}/api/config`, envFor(), {
+    const response = await adminCall(`${DEFAULT_ADMIN_PATH}/api/config`, envFor(), {
       method: 'PUT',
       body: { bots: [] },
     });

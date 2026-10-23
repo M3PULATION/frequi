@@ -3,13 +3,25 @@
   "name": "frequi-terminal",
   "main": "worker/index.ts",
   "compatibility_date": "2025-09-01",
+  // Path that serves the config page and prefixes its API. Change it to your
+  // own private entry (for example "/my-private-entry"); the default works as-is.
+  "vars": {
+    "ADMIN_PATH": "/admin"
+  },
   "assets": {
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/local/*", "/healthz", "/my-private-entry", "/my-private-entry/*"]
+    // This static list cannot read vars.ADMIN_PATH, so it must be kept in sync
+    // by hand: if you change ADMIN_PATH above, change the two admin entries
+    // here to the same path (both the bare path and the "/*" variant).
+    "run_worker_first": ["/api/*", "/local/*", "/healthz", "/admin", "/admin/*"]
   },
   "kv_namespaces": [
+    // Placeholder: create the namespace with
+    //   pnpm exec wrangler kv namespace create BOTS_KV
+    // then replace this value with the id it prints. `wrangler dev` accepts the
+    // placeholder (it uses local storage), but `wrangler deploy` needs the real id.
     { "binding": "BOTS_KV", "id": "<your-kv-namespace-id>" }
   ]
 }

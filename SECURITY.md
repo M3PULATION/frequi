@@ -15,7 +15,8 @@ In scope:
 
 - Bypassing the read-only method whitelist in `terminal/worker/core.ts`.
 - Leaking bot credentials through API responses, error messages, logs, or the admin page.
-- Authenticating to `/my-private-entry/api/*` without the configured `ADMIN_TOKEN`.
+- Authenticating to `${ADMIN_PATH}/api/*` (default `/admin/api/*`) without the configured `ADMIN_TOKEN`.
+- Treating the configurable `ADMIN_PATH` as an access-control boundary. It only selects the entry URL; authorization is enforced by `ADMIN_TOKEN`.
 - Worker routing or request-body handling flaws that expose configuration.
 
 Out of scope:

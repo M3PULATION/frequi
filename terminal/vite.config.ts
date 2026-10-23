@@ -6,12 +6,13 @@ import { defineConfig } from 'vitest/config';
 /**
  * Local Workers runtime started by `pnpm dev:worker`.
  *
- * Keep the admin entry in `proxy` in sync with ADMIN_BASE in worker/core.ts.
- * It is hardcoded here because Vite resolves this file outside the worker
- * module graph, and importing core.ts would pull the admin HTML into the
- * Vite config.
+ * Keep the admin entry in `proxy` in sync with the ADMIN_PATH var. Vite reads
+ * the config outside the worker module graph, so this cannot come from
+ * wrangler.jsonc; set ADMIN_PATH in the environment for Vite as well when you
+ * customize the path (`ADMIN_PATH=/my-entry pnpm dev`).
  */
 const WORKER_ORIGIN = 'http://127.0.0.1:8787';
+const ADMIN_PATH = process.env.ADMIN_PATH?.trim() || '/admin';
 
 export default defineConfig({
   plugins: [react(), tailwindcss()],
@@ -27,7 +28,7 @@ export default defineConfig({
       '/api': WORKER_ORIGIN,
       '/local': WORKER_ORIGIN,
       '/healthz': WORKER_ORIGIN,
-      '/my-private-entry': WORKER_ORIGIN,
+      [ADMIN_PATH]: WORKER_ORIGIN,
     },
   },
   test: {
