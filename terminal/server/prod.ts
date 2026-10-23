@@ -1,15 +1,25 @@
-import { createServer, type IncomingMessage, type ServerResponse } from 'http';
-import { normalize, resolve, sep } from 'path';
-import { readFile } from 'fs';
-import { promisify } from 'util';
-import { createProxy } from './botsProxy';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { extname, join, normalize, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const readFileAsync = promisify(readFile);
+import { createBotProxy } from './botsProxy.ts';
+
+const dist = fileURLToPath(new URL('../dist', import.meta.url));
+const botsFile = process.env.BOTS_FILE || fileURLToPath(new URL('../bots.local.json', import.meta.url));
+const port = Number(process.env.PORT || 80);
+const proxy = createBotProxy(botsFile);
 
 const mime: Record<string, string> = {
-  html: 'text/html',
-  js: 'application/javascript',
-  css: 'text/css',
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
 };
 
 function serveStatic(req: IncomingMessage, res: ServerResponse) {
@@ -31,5 +41,36 @@ function serveStatic(req: IncomingMessage, res: ServerResponse) {
     res.end();
     return;
   }
-  ...
+  if (!existsSync(file) || statSync(file).isDirectory()) file = join(root, 'index.html');
+  if (!existsSync(file)) {
+    res.statusCode = 404;
+    res.end();
+    return;
+  }
+  res.setHeader('Content-Type', mime[extname(file)] || 'application/octet-stream');
+  createReadStream(file).pipe(res);
 }
+
+const server = createServer((req, res) => {
+  const path = (req.url || '/').split('?')[0];
+  if (path === '/healthz') {
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
+    res.end(JSON.stringify({ ok: true }));
+    return;
+  }
+  proxy(req, res, () => serveStatic(req, res));
+});
+
+server.listen(port, '0.0.0.0', () => {
+  console.log(`实盘操作台 http://0.0.0.0:${port}`);
+});
+
+function shutdown(signal: string) {
+  console.log(`收到 ${signal}，正在关闭`);
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 10_000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
