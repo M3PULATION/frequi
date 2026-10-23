@@ -6,6 +6,8 @@
  */
 
 import { adminPageHtml } from './adminPage';
+import { localDocHtml } from './localDoc';
+import { OPENAPI_DOCUMENT } from './openapi';
 
 export type BotConfig = {
   id: string;
@@ -60,6 +62,15 @@ export type WorkerEnv = {
 };
 
 const READONLY_POST = new Set(['/api/v1/pair_candles', '/api/v1/pair_history']);
+
+/** Convenience reads: `/local/bots/:id/<action>` → the matching freqtrade endpoint. */
+const LOCAL_BOT_ROUTE = /^\/local\/bots\/([^/]+)\/(status|balance|profit|trades)$/;
+const LOCAL_BOT_UPSTREAM: Record<string, string> = {
+  status: '/api/v1/status',
+  balance: '/api/v1/balance',
+  profit: '/api/v1/profit',
+  trades: '/api/v1/trades',
+};
 
 /**
  * Default path for the config page and its API. Deployers override it with the
@@ -296,6 +307,8 @@ export function isReadOnly(method: string, path: string): boolean {
 }
 
 const NO_STORE = { 'Cache-Control': 'no-store' };
+/** Aggregate reads time out quickly so one slow bot cannot stall /local/overview. */
+export const LOCAL_UPSTREAM_TIMEOUT_MS = 5_000;
 
 function json(data: unknown, status = 200, headers?: Record<string, string>): Response {
   return new Response(JSON.stringify(data), {
@@ -479,6 +492,19 @@ function adminPage(base: string): Response {
   });
 }
 
+function localDocPage(): Response {
+  return new Response(localDocHtml(), {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Robots-Tag': 'noindex, nofollow',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+    },
+  });
+}
+
 type BodyResult = { ok: true; body?: Uint8Array } | { ok: false };
 
 /** Reads at most MAX_BODY_BYTES, checking both the declared and the actual length. */
@@ -522,6 +548,7 @@ type ProxyState = {
   raw: string;
   botFor(id: string): BotConfig | undefined;
   listBots(): Promise<ListedBot[]>;
+  getJson(bot: BotConfig, pathname: string): Promise<unknown>;
   forward(request: Request, url: URL, bot: BotConfig): Promise<Response>;
 };
 
@@ -660,6 +687,47 @@ function createProxyState(raw: string): ProxyState {
     return catalogFlight;
   }
 
+  /**
+   * One authenticated read against a bot, renewing the session once on 401.
+   * The upstream path is built here so callers cannot smuggle a host.
+   */
+  async function authedFetch(
+    bot: BotConfig,
+    pathname: string,
+    search: string,
+    init: { method: string; body?: Uint8Array; timeoutMs: number },
+  ): Promise<Response> {
+    const target = `${bot.origin}${pathname}${search}`;
+    const send = (session: Session) =>
+      fetch(target, {
+        method: init.method,
+        headers: {
+          Authorization: `Bearer ${session.access}`,
+          ...(init.body && init.body.byteLength > 0 ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: init.body && init.body.byteLength > 0 ? (init.body as BodyInit) : undefined,
+        signal: AbortSignal.timeout(init.timeoutMs),
+      });
+
+    let session = await ensureSession(bot);
+    let upstream = await send(session);
+    if (upstream.status === 401) {
+      session = await ensureSession(bot, true);
+      upstream = await send(session);
+    }
+    return upstream;
+  }
+
+  /** Read one JSON endpoint. Transport errors and non-2xx responses throw. */
+  async function getJson(bot: BotConfig, pathname: string): Promise<unknown> {
+    const upstream = await authedFetch(bot, pathname, '', {
+      method: 'GET',
+      timeoutMs: LOCAL_UPSTREAM_TIMEOUT_MS,
+    });
+    if (!upstream.ok) throw new Error(String(upstream.status));
+    return upstream.json();
+  }
+
   async function forward(request: Request, url: URL, bot: BotConfig): Promise<Response> {
     const method = request.method.toUpperCase();
     if (!isReadOnly(method, url.pathname)) {
@@ -673,24 +741,11 @@ function createProxyState(raw: string): ProxyState {
       body = read.body;
     }
 
-    const target = `${bot.origin}${url.pathname}${url.search}`;
-    const send = (session: Session) =>
-      fetch(target, {
-        method,
-        headers: {
-          Authorization: `Bearer ${session.access}`,
-          ...(body && body.byteLength > 0 ? { 'Content-Type': 'application/json' } : {}),
-        },
-        body: body && body.byteLength > 0 ? (body as BodyInit) : undefined,
-        signal: AbortSignal.timeout(25_000),
-      });
-
-    let session = await ensureSession(bot);
-    let upstream = await send(session);
-    if (upstream.status === 401) {
-      session = await ensureSession(bot, true);
-      upstream = await send(session);
-    }
+    const upstream = await authedFetch(bot, url.pathname, url.search, {
+      method,
+      body,
+      timeoutMs: 25_000,
+    });
 
     const headers = new Headers();
     const contentType = upstream.headers.get('content-type');
@@ -703,7 +758,7 @@ function createProxyState(raw: string): ProxyState {
     return new Response(payload, { status: upstream.status, headers });
   }
 
-  return { raw, botFor: (id) => byId.get(id), listBots, forward };
+  return { raw, botFor: (id) => byId.get(id), listBots, getJson, forward };
 }
 
 let currentState: ProxyState | null = null;
@@ -715,6 +770,35 @@ async function stateFor(env: WorkerEnv): Promise<ProxyState> {
   const next = createProxyState(raw);
   currentState = next;
   return next;
+}
+
+type OverviewBot = ListedBot & { status: unknown; profit: unknown; balance: unknown };
+
+/**
+ * One aggregate snapshot for every configured bot.
+ *
+ * Each field is fetched independently and failures collapse to `null`, so one
+ * unreachable or older bot (for example one without /api/v1/balance) never
+ * breaks the response for the others. Offline bots are not probed again: the
+ * catalog already told us they are down.
+ */
+async function buildOverview(state: ProxyState): Promise<Response> {
+  const listed = await state.listBots();
+  const bots = await Promise.all(
+    listed.map(async (bot): Promise<OverviewBot> => {
+      const config = state.botFor(bot.id);
+      if (!config || !bot.online) {
+        return { ...bot, status: null, profit: null, balance: null };
+      }
+      const [status, profit, balance] = await Promise.all([
+        state.getJson(config, '/api/v1/status').catch(() => null),
+        state.getJson(config, '/api/v1/profit').catch(() => null),
+        state.getJson(config, '/api/v1/balance').catch(() => null),
+      ]);
+      return { ...bot, status, profit, balance };
+    }),
+  );
+  return json({ generatedAt: new Date().toISOString(), bots }, 200, NO_STORE);
 }
 
 /** Reject malformed percent-encoding before it reaches the proxy or the assets layer. */
@@ -738,6 +822,44 @@ async function route(request: Request, env: WorkerEnv): Promise<Response> {
   // branch used to swallow every /api/* request.
   if (pathname === '/healthz') {
     return json({ ok: true }, 200, { 'Cache-Control': 'no-store' });
+  }
+
+  if (pathname === '/openapi.json') {
+    return json(OPENAPI_DOCUMENT, 200, NO_STORE);
+  }
+
+  if (pathname === '/local/doc') {
+    return localDocPage();
+  }
+
+  if (pathname === '/local/overview') {
+    const state = await stateFor(env);
+    return buildOverview(state);
+  }
+
+  // Must come before the generic `/local/bots` prefix branch below, otherwise
+  // the prefix would answer these reads with the bot catalog.
+  const localBot = LOCAL_BOT_ROUTE.exec(pathname);
+  if (localBot) {
+    const state = await stateFor(env);
+    let id: string;
+    try {
+      id = decodeURIComponent(localBot[1]!);
+    } catch {
+      return json({ detail: '未知实盘' }, 404, NO_STORE);
+    }
+    const bot = state.botFor(id);
+    if (!bot) return json({ detail: '未知实盘' }, 404, NO_STORE);
+
+    // Remap only the path; a query string such as ?limit=20 passes through.
+    const target = new URL(request.url);
+    target.pathname = LOCAL_BOT_UPSTREAM[localBot[2]!]!;
+    try {
+      return await state.forward(request, target, bot);
+    } catch (error) {
+      if (error instanceof BadRequestError) return json({ detail: error.message }, 400, NO_STORE);
+      return json({ detail: error instanceof Error ? error.message : '实盘不可达' }, 502, NO_STORE);
+    }
   }
 
   if (pathname.startsWith('/local/bots')) {

@@ -28,6 +28,7 @@ export default defineConfig({
       '/api': WORKER_ORIGIN,
       '/local': WORKER_ORIGIN,
       '/healthz': WORKER_ORIGIN,
+      '/openapi.json': WORKER_ORIGIN,
       [ADMIN_PATH]: WORKER_ORIGIN,
     },
   },

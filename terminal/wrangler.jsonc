@@ -17,7 +17,8 @@
     // here to the same path (both the bare path and the "/*" variant).
     // The bare /api and /local entries let the worker answer an ADMIN_PATH
     // conflict explicitly instead of letting Assets serve the SPA.
-    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/admin", "/admin/*"]
+    // /openapi.json is worker-owned too and must not fall through to the SPA.
+    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/openapi.json", "/admin", "/admin/*"]
   },
   "kv_namespaces": [
     // Placeholder: create the namespace with
