@@ -58,7 +58,9 @@
 - `terminal/worker/core.ts`:路由、KV 读取、管理认证、只读转发与缓存。
 - `terminal/worker/adminPage.ts`:自包含的管理页 HTML,不进入前端构建产物。
 - `terminal/src/`:React 前端,构建后写入 `terminal/dist`。
-- `terminal/wrangler.jsonc`:Worker、Assets 与 KV 绑定。
+- `terminal/wrangler.jsonc`:被 git 跟踪的模板配置,含 Worker、Assets 与 KV 绑定,但只放占位符(`ADMIN_PATH` 为 `/admin`,KV id 为 `<your-kv-namespace-id>`)。不要在这里填真实值。
+- `terminal/wrangler.local.jsonc.example`:本地配置示例。复制为 `terminal/wrangler.local.jsonc` 后填入你自己的真实值。
+- `terminal/wrangler.local.jsonc`:你自己的真实配置(管理路径、KV id),已在 `.gitignore` 中,**不要提交**。
 - 路由分发:`/api/*`、`/local/*`、`/healthz` 以及 `ADMIN_PATH`(默认 `/admin`)下的路径先交给 Worker;其余路径交给 Assets,SPA 回退到 `index.html`。注意 `run_worker_first` 是静态列表,必须与 `ADMIN_PATH` 手动保持一致。
 
 ## 部署前置条件
@@ -80,15 +82,18 @@ pnpm exec wrangler login
 
 1. **创建 KV namespace**
 
+   先把示例复制成本地配置(后续的真实值都填在这里):
+
    ```bash
+   cp wrangler.local.jsonc.example wrangler.local.jsonc
    pnpm exec wrangler kv namespace create BOTS_KV
    ```
 
-   命令会输出 namespace 的 `id`。把它填入 `wrangler.jsonc` 的 `kv_namespaces[0].id`;仓库里是占位符 `<your-kv-namespace-id>`,部署前必须换成你自己的,否则 `wrangler deploy` 会因绑定无效而失败。`wrangler dev` 使用本地 KV,占位符不影响启动。
+   命令会输出 namespace 的 `id`。把它填入 `wrangler.local.jsonc` 的 `kv_namespaces[0].id`;示例里是占位符 `<your-kv-namespace-id>`,部署前必须换成你自己的,否则 `wrangler deploy` 会因绑定无效而失败。被跟踪的 `wrangler.jsonc` 保留占位符即可,不要修改。`wrangler dev` 使用本地 KV,占位符不影响启动。
 
 2. **配置管理页路径(可选)**
 
-   `wrangler.jsonc` 的 `vars.ADMIN_PATH` 默认是 `/admin`,开箱即用。建议改成只有你知道的入口,例如 `/my-private-entry`。修改时 `wrangler.jsonc` 里**必须同步改两处**,否则请求到不了 Worker:
+   `wrangler.local.jsonc` 的 `vars.ADMIN_PATH` 在示例里是 `/your-private-entry`(模板 `wrangler.jsonc` 里是占位的 `/admin`)。建议改成只有你知道的入口,例如 `/my-private-entry`。修改时 `wrangler.local.jsonc` 里**必须同步改两处**,否则请求到不了 Worker:
 
    - `vars.ADMIN_PATH`
    - `assets.run_worker_first` 中的两项(裸路径与 `/*` 变体),例如 `["/my-private-entry", "/my-private-entry/*"]`
@@ -109,18 +114,20 @@ pnpm exec wrangler login
    pnpm exec wrangler secret put ADMIN_TOKEN
    ```
 
-   令牌就是管理页的登录凭据。请使用足够长的随机值,例如 `openssl rand -base64 32`。不要把它写进仓库、`wrangler.jsonc` 或聊天记录。
+   令牌就是管理页的登录凭据。请使用足够长的随机值,例如 `openssl rand -base64 32`。不要把它写进仓库、任何 wrangler 配置文件或聊天记录。
 
 5. **部署**
 
    ```bash
-   pnpm deploy:worker
-   # 等价于 pnpm exec wrangler deploy
+   # 用本地配置部署(推荐)
+   pnpm exec wrangler deploy --config wrangler.local.jsonc --keep-vars
    ```
+
+   `--keep-vars` 会保留只存在于 Cloudflare 的 `ADMIN_TOKEN` 密钥;不加它,部署可能清掉之前用 `wrangler secret put` 设置的 secret。不要直接运行 `wrangler deploy`(即 `pnpm deploy:worker`),它会读取被跟踪的模板 `wrangler.jsonc`,用占位值覆盖线上配置。
 
 6. **添加机器人**
 
-   打开 `https://<worker-name>.<your-subdomain>.workers.dev<ADMIN_PATH>`,例如默认的 `https://<worker-name>.<your-subdomain>.workers.dev/admin`,或你自定义的 `/my-private-entry`。输入 `ADMIN_TOKEN`,然后填写每台实盘的名称、地址、用户名和密码并保存。
+   打开 `https://<worker-name>.<your-subdomain>.workers.dev<ADMIN_PATH>`,例如示例配置里的 `https://<worker-name>.<your-subdomain>.workers.dev/your-private-entry`,或你改成 `/my-private-entry` 后的地址。输入 `ADMIN_TOKEN`,然后填写每台实盘的名称、地址、用户名和密码并保存。
 
    可选:在 Cloudflare 控制台为 Worker 绑定自有域名,再按同样方式访问管理页。
 
@@ -129,9 +136,9 @@ pnpm exec wrangler login
 本地开发需要两个终端:一个跑 Workers,一个跑 Vite。Vite 会把 `/api`、`/local`、`/healthz` 和 `ADMIN_PATH`(默认 `/admin`)代理到 `127.0.0.1:8787`。若要使用自定义路径,请让 Workers 和 Vite 使用同一个值,并同步 `run_worker_first`:
 
 ```bash
-# wrangler.jsonc: vars.ADMIN_PATH 与 run_worker_first 都要改成 /my-private-entry
+# wrangler.local.jsonc: vars.ADMIN_PATH 与 run_worker_first 都要改成 /my-private-entry
 ADMIN_PATH=/my-private-entry pnpm dev                # Vite
-pnpm exec wrangler dev --var ADMIN_PATH:/my-private-entry  # Workers
+pnpm exec wrangler dev --config wrangler.local.jsonc --var ADMIN_PATH:/my-private-entry  # Workers
 ```
 
 ```bash
@@ -178,7 +185,7 @@ curl http://127.0.0.1:8787/local/bots
 | `pnpm build` | 前端类型检查并构建到 `dist/` |
 | `pnpm typecheck:worker` | 单独检查 Worker 代码 |
 | `pnpm test` | 运行 Vitest |
-| `pnpm deploy:worker` | 部署到 Cloudflare |
+| `pnpm exec wrangler deploy --config wrangler.local.jsonc --keep-vars` | 用本地配置部署到 Cloudflare |
 
 ## 配置与生效时间
 
@@ -239,11 +246,11 @@ Worker 从 Cloudflare 网络发起请求,不能访问你电脑上的 `127.0.0.1`
 
 **改了 `ADMIN_PATH` 后管理页 404,或返回了前端 SPA**
 
-请求在到达 Worker 前被 Assets 接走了。请把 `wrangler.jsonc` 中 `assets.run_worker_first` 的两项(裸路径与 `/*`)改成同一个新路径,然后重新部署。这个列表是静态的,不会读取 `vars.ADMIN_PATH`。
+请求在到达 Worker 前被 Assets 接走了。请把 `wrangler.local.jsonc` 中 `assets.run_worker_first` 的两项(裸路径与 `/*`)改成同一个新路径,然后用 `--config wrangler.local.jsonc` 重新部署。这个列表是静态的,不会读取 `vars.ADMIN_PATH`。
 
 **`wrangler deploy` 报 KV namespace 不存在**
 
-仓库里的 `kv_namespaces[0].id` 是占位符 `<your-kv-namespace-id>`。先执行 `pnpm exec wrangler kv namespace create BOTS_KV`,把输出的真实 id 填进去。`wrangler dev` 使用本地 KV,占位符也能启动;`deploy` 必须使用真实 id。
+`wrangler.local.jsonc` 里的 `kv_namespaces[0].id` 还是占位符 `<your-kv-namespace-id>`(被跟踪的 `wrangler.jsonc` 本来就只放占位符,不要改它)。先执行 `pnpm exec wrangler kv namespace create BOTS_KV`,把输出的真实 id 填进 `wrangler.local.jsonc`。`wrangler dev` 使用本地 KV,占位符也能启动;`deploy` 必须使用真实 id。
 
 **`/local/bots` 返回 `[]` 或全部离线**
 

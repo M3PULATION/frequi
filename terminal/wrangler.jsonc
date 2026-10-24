@@ -5,8 +5,10 @@
   "compatibility_date": "2025-09-01",
   // Path that serves the config page and prefixes its API. Change it to your
   // own private entry (for example "/my-private-entry"); the default works as-is.
+  // Deployers: do not commit your real admin path. Copy wrangler.local.jsonc.example
+  // to wrangler.local.jsonc (git-ignored) and deploy with `--config`.
   "vars": {
-    "ADMIN_PATH": "/my-private-entry"
+    "ADMIN_PATH": "/admin"
   },
   "assets": {
     "directory": "./dist",
@@ -18,13 +20,14 @@
     // The bare /api and /local entries let the worker answer an ADMIN_PATH
     // conflict explicitly instead of letting Assets serve the SPA.
     // /openapi.json is worker-owned too and must not fall through to the SPA.
-    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/openapi.json", "/my-private-entry", "/my-private-entry/*"]
+    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/openapi.json", "/admin", "/admin/*"]
   },
   "kv_namespaces": [
     // Placeholder: create the namespace with
     //   pnpm exec wrangler kv namespace create BOTS_KV
     // then replace this value with the id it prints. `wrangler dev` accepts the
     // placeholder (it uses local storage), but `wrangler deploy` needs the real id.
+    // For a real deployment keep the id in wrangler.local.jsonc instead.
     { "binding": "BOTS_KV", "id": "<your-kv-namespace-id>" }
   ]
 }

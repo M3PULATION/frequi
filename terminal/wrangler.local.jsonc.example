@@ -1,0 +1,41 @@
+{
+  // Copy to wrangler.local.jsonc and fill in your real values.
+  // wrangler.local.jsonc is git-ignored; never commit it.
+  //
+  // Deploy with:
+  //   sh /data/bin/cf-deploy.sh terminal/wrangler.local.jsonc
+  // or directly:
+  //   npx wrangler deploy --config wrangler.local.jsonc --keep-vars
+  //
+  // Notes:
+  // - --keep-vars preserves the ADMIN_TOKEN secret stored in Cloudflare.
+  //   Without it, deploying can drop secrets that live only in the dashboard.
+  // - ADMIN_PATH here must match the admin entries in the assets
+  //   run_worker_first list below, both the bare path and the "/*" variant.
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "frequi-terminal",
+  "main": "worker/index.ts",
+  "compatibility_date": "2025-09-01",
+  "vars": {
+    "ADMIN_PATH": "/your-private-entry"
+  },
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api",
+      "/api/*",
+      "/local",
+      "/local/*",
+      "/healthz",
+      "/healthz/*",
+      "/openapi.json",
+      "/your-private-entry",
+      "/your-private-entry/*"
+    ]
+  },
+  "kv_namespaces": [
+    { "binding": "BOTS_KV", "id": "<your-kv-namespace-id>" }
+  ]
+}

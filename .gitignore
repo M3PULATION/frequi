@@ -26,3 +26,6 @@ yarn-error.log*
 .codex/
 .claude/*.local.json
 .claude/**/*.log
+
+# Local deployment config with real production values (admin path, KV id)
+terminal/wrangler.local.jsonc
