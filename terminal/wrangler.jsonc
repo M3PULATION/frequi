@@ -6,7 +6,7 @@
   // Path that serves the config page and prefixes its API. Change it to your
   // own private entry (for example "/my-private-entry"); the default works as-is.
   "vars": {
-    "ADMIN_PATH": "/admin"
+    "ADMIN_PATH": "/my-private-entry"
   },
   "assets": {
     "directory": "./dist",
@@ -18,7 +18,7 @@
     // The bare /api and /local entries let the worker answer an ADMIN_PATH
     // conflict explicitly instead of letting Assets serve the SPA.
     // /openapi.json is worker-owned too and must not fall through to the SPA.
-    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/openapi.json", "/admin", "/admin/*"]
+    "run_worker_first": ["/api", "/api/*", "/local", "/local/*", "/healthz", "/healthz/*", "/openapi.json", "/my-private-entry", "/my-private-entry/*"]
   },
   "kv_namespaces": [
     // Placeholder: create the namespace with
